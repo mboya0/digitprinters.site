@@ -11,6 +11,7 @@ import CopyTrading from './pages/CopyTrading';
 import AIAnalysis from './pages/AIAnalysis';
 import Settings from './pages/Settings';
 import Callback from './pages/Callback';
+import ProtectedRoute from './components/common/ProtectedRoute';
 
 function App() {
   return (
@@ -22,12 +23,15 @@ function App() {
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/callback" element={<Callback />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/trading" element={<Trading />} />
-              <Route path="/bots" element={<Bots />} />
-              <Route path="/copy-trading" element={<CopyTrading />} />
-              <Route path="/ai-analysis" element={<AIAnalysis />} />
-              <Route path="/settings" element={<Settings />} />
+              <Route path="/oauth/callback" element={<Callback />} />
+              <Route element={<ProtectedRoute />}>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/trading" element={<Trading />} />
+                <Route path="/bots" element={<Bots />} />
+                <Route path="/copy-trading" element={<CopyTrading />} />
+                <Route path="/ai-analysis" element={<AIAnalysis />} />
+                <Route path="/settings" element={<Settings />} />
+              </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>

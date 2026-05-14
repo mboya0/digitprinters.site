@@ -6,8 +6,27 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { initDeriv } from '../services/deriv';
 import { useToast } from './ToastContext';
+import { DERIV_OAUTH_CONFIG } from '../utils/constants';
 
 const AuthContext = createContext(null);
+
+const getStoredState = () => localStorage.getItem('deriv_oauth_state');
+const getPostLoginRedirect = () => localStorage.getItem('deriv_post_login_redirect') || '/dashboard';
+const clearStoredAuthState = () => {
+  localStorage.removeItem('deriv_oauth_state');
+  localStorage.removeItem('deriv_post_login_redirect');
+};
+
+const generateRandomState = () => {
+  const array = new Uint8Array(16);
+  window.crypto.getRandomValues(array);
+  return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+const storeAuthState = (state, redirectPath) => {
+  localStorage.setItem('deriv_oauth_state', state);
+  localStorage.setItem('deriv_post_login_redirect', redirectPath || '/dashboard');
+};
 
 export const AuthProvider = ({ children }) => {
   const { addToast } = useToast();
@@ -22,6 +41,78 @@ export const AuthProvider = ({ children }) => {
   const [websiteStatus, setWebsiteStatus] = useState(null);
   const [accessToken, setAccessToken] = useState(localStorage.getItem('deriv_access_token'));
   const [refreshToken, setRefreshToken] = useState(localStorage.getItem('deriv_refresh_token'));
+  const [tokenExpiry, setTokenExpiry] = useState(
+    Number(localStorage.getItem('deriv_token_expiry')) || null
+  );
+  const [loginStatus, setLoginStatus] = useState(accessToken ? 'pending' : 'unauthenticated');
+
+  const logout = useCallback(() => {
+    setIsAuthenticated(false);
+    setUser(null);
+    setAccounts([]);
+    setSelectedAccount(null);
+    setAccessToken(null);
+    setRefreshToken(null);
+    setTokenExpiry(null);
+    setLoginStatus('unauthenticated');
+    setStatus('disconnected');
+    setWebsiteStatus(null);
+    setError(null);
+    localStorage.removeItem('deriv_access_token');
+    localStorage.removeItem('deriv_refresh_token');
+    localStorage.removeItem('deriv_token_expiry');
+    clearStoredAuthState();
+    if (deriv) {
+      deriv.disconnect();
+    }
+  }, [deriv]);
+
+  const refreshAccessToken = useCallback(async () => {
+    if (!refreshToken) {
+      return null;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/oauth-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          redirect_uri: window.location.origin,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.access_token) {
+        throw new Error(data.error || 'Failed to refresh Deriv session');
+      }
+
+      const expiry = data.expires_in ? Date.now() + data.expires_in * 1000 : null;
+      localStorage.setItem('deriv_access_token', data.access_token);
+      localStorage.setItem('deriv_refresh_token', data.refresh_token || refreshToken);
+      if (expiry) localStorage.setItem('deriv_token_expiry', String(expiry));
+
+      setAccessToken(data.access_token);
+      setRefreshToken(data.refresh_token || refreshToken);
+      setTokenExpiry(expiry);
+      setLoginStatus('authenticated');
+      setError(null);
+
+      if (deriv) {
+        deriv.setToken(data.access_token);
+        await deriv.connect();
+      }
+
+      return data;
+    } catch (err) {
+      logout();
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [deriv, logout, refreshToken]);
 
   useEffect(() => {
     const derivInstance = initDeriv();
@@ -45,30 +136,32 @@ export const AuthProvider = ({ children }) => {
     };
 
     const handleAuthorized = async (data) => {
+      setLoginStatus('authenticated');
       setIsAuthenticated(true);
       setError(null);
-      if (data.authorize) {
-        const account = data.authorize.account || {};
-        setUser({
-          accountId: account.account_number || account.loginid || 'Unknown',
-          balance: account.balance || 0,
-          currency: account.currency || 'USD',
-          email: account.email || '',
-        });
 
-        try {
-          const accountListResponse = await derivInstance.getAccountList();
-          const fetchedAccounts = Array.isArray(accountListResponse.account_list)
-            ? accountListResponse.account_list
-            : [];
-          setAccounts(fetchedAccounts);
-          const authorizedAccount = fetchedAccounts.find(
-            (acc) => acc.account_number === account.account_number || acc.loginid === account.loginid
-          );
-          setSelectedAccount(authorizedAccount || fetchedAccounts[0] || null);
-        } catch (err) {
-          console.error('Error fetching accounts:', err);
-        }
+      const account = data.authorize?.account || {};
+      setUser({
+        accountId: account.account_number || account.loginid || 'Unknown',
+        balance: Number(account.balance || 0),
+        currency: account.currency || 'USD',
+        email: account.email || '',
+        accountType:
+          account.is_virtual || account.account_type === 'virtual' ? 'Demo' : 'Real',
+      });
+
+      try {
+        const accountListResponse = await derivInstance.getAccountList();
+        const fetchedAccounts = Array.isArray(accountListResponse.account_list)
+          ? accountListResponse.account_list
+          : [];
+        setAccounts(fetchedAccounts);
+        const authorizedAccount = fetchedAccounts.find(
+          (acc) => acc.account_number === account.account_number || acc.loginid === account.loginid
+        );
+        setSelectedAccount(authorizedAccount || fetchedAccounts[0] || null);
+      } catch (err) {
+        console.error('Error fetching accounts:', err);
       }
     };
 
@@ -102,11 +195,27 @@ export const AuthProvider = ({ children }) => {
     const unsubError = derivInstance.on('error', handleError);
     const unsubAuthorized = derivInstance.on('authorized', handleAuthorized);
 
-    let refreshInterval = null;
+    let refreshTimer = null;
+    const scheduleRefresh = () => {
+      if (!tokenExpiry || !refreshToken) return;
+      const msUntilRefresh = tokenExpiry - Date.now() - 120000;
+      if (msUntilRefresh <= 0) {
+        refreshAccessToken().catch(() => {});
+        return;
+      }
+      refreshTimer = window.setTimeout(() => {
+        refreshAccessToken().catch(() => {});
+      }, msUntilRefresh);
+    };
+
     if (accessToken) {
       derivInstance.setToken(accessToken);
-      connect();
-      refreshInterval = setInterval(fetchAccounts, 45000);
+      if (tokenExpiry && Date.now() > tokenExpiry && refreshToken) {
+        refreshAccessToken().catch(() => {});
+      } else {
+        connect();
+      }
+      scheduleRefresh();
     } else {
       setLoading(false);
     }
@@ -115,60 +224,79 @@ export const AuthProvider = ({ children }) => {
       unsubStatus();
       unsubError();
       unsubAuthorized();
-      if (refreshInterval) {
-        clearInterval(refreshInterval);
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
       }
       derivInstance.disconnect();
     };
-  }, [accessToken, addToast]);
+  }, [accessToken, addToast, refreshAccessToken, refreshToken, tokenExpiry]);
 
   const login = useCallback(() => {
-    const appId = '332LK4VWd9A4pEEfTMn53';
-    const redirectUri = encodeURIComponent(window.location.origin + '/callback');
-    const oauthUrl = `https://oauth.deriv.com/oauth2/authorize?client_id=${appId}&redirect_uri=${redirectUri}&response_type=code&scope=read`;
+    const state = generateRandomState();
+    const redirectPath = window.location.pathname === '/' ? '/dashboard' : window.location.pathname;
+    storeAuthState(state, redirectPath);
+    const redirectUri = window.location.origin;
+    const oauthUrl = `${DERIV_OAUTH_CONFIG.authorize_url}?response_type=code&client_id=${DERIV_OAUTH_CONFIG.client_id}&redirect_uri=${encodeURIComponent(
+      redirectUri
+    )}&scope=${encodeURIComponent(DERIV_OAUTH_CONFIG.scope)}&state=${state}`;
     window.location.href = oauthUrl;
   }, []);
 
   const handleCallback = useCallback(
-    async (code) => {
+    async (code, state) => {
       setLoading(true);
-      try {
-        const appId = '332LK4VWd9A4pEEfTMn53';
-        const clientSecret = '3JNlgipzptboEHB';
-        const redirectUri = window.location.origin + '/callback';
+      setError(null);
+      const storedState = getStoredState();
 
-        const response = await fetch('https://oauth.deriv.com/oauth2/token', {
+      if (!code) {
+        throw new Error('Missing authorization code');
+      }
+
+      if (!storedState || storedState !== state) {
+        clearStoredAuthState();
+        throw new Error('Invalid OAuth state. Please try logging in again.');
+      }
+
+      try {
+        const response = await fetch('/api/oauth-token', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/json',
           },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
+          body: JSON.stringify({
             code,
-            client_id: appId,
-            client_secret: clientSecret,
-            redirect_uri: redirectUri,
+            redirect_uri: window.location.origin,
           }),
         });
 
-        if (!response.ok) {
-          throw new Error('Failed to exchange code for token');
+        const data = await response.json();
+        if (!response.ok || !data.access_token) {
+          throw new Error(data.error || 'Failed to exchange code for token');
         }
 
-        const data = await response.json();
-        const { access_token, refresh_token } = data;
+        const expiry = data.expires_in ? Date.now() + data.expires_in * 1000 : null;
+        localStorage.setItem('deriv_access_token', data.access_token);
+        localStorage.setItem('deriv_refresh_token', data.refresh_token || '');
+        if (expiry) {
+          localStorage.setItem('deriv_token_expiry', String(expiry));
+        }
 
-        setAccessToken(access_token);
-        setRefreshToken(refresh_token);
-        localStorage.setItem('deriv_access_token', access_token);
-        localStorage.setItem('deriv_refresh_token', refresh_token);
+        setAccessToken(data.access_token);
+        setRefreshToken(data.refresh_token || '');
+        setTokenExpiry(expiry);
+        setLoginStatus('authenticated');
+        clearStoredAuthState();
 
         if (deriv) {
-          deriv.setToken(access_token);
+          deriv.setToken(data.access_token);
           await deriv.connect();
         }
+
+        return getPostLoginRedirect();
       } catch (err) {
         setError(err.message || 'OAuth callback failed');
+        setLoginStatus('unauthenticated');
+        throw err;
       } finally {
         setLoading(false);
       }
@@ -210,20 +338,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [deriv, accessToken]);
 
-  const logout = useCallback(() => {
-    setIsAuthenticated(false);
-    setUser(null);
-    setAccounts([]);
-    setSelectedAccount(null);
-    setAccessToken(null);
-    setRefreshToken(null);
-    localStorage.removeItem('deriv_access_token');
-    localStorage.removeItem('deriv_refresh_token');
-    if (deriv) {
-      deriv.disconnect();
-    }
-  }, [deriv]);
-
   return (
     <AuthContext.Provider
       value={{
@@ -243,6 +357,7 @@ export const AuthProvider = ({ children }) => {
         connectDeriv,
         authorize,
         logout,
+        loginStatus,
       }}
     >
       {children}

@@ -20,7 +20,7 @@ const navigation = [
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, login } = useAuth();
 
   return (
     <nav className="sticky top-0 z-50 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl shadow-[0_25px_80px_rgba(15,23,42,0.35)]">
@@ -63,13 +63,13 @@ export default function Navbar() {
               Logout
             </button>
           ) : (
-            <Link
-              to="/"
+            <button
+              onClick={login}
               className="inline-flex items-center rounded-full bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
             >
               <LogIn size={16} />
-              Login
-            </Link>
+              Login with Deriv
+            </button>
           )}
         </div>
 
@@ -119,13 +119,15 @@ export default function Navbar() {
                 Logout
               </button>
             ) : (
-              <Link
-                to="/"
+              <button
+                onClick={() => {
+                  login();
+                  setIsOpen(false);
+                }}
                 className="rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-                onClick={() => setIsOpen(false)}
               >
-                Login
-              </Link>
+                Login with Deriv
+              </button>
             )}
           </div>
         </div>

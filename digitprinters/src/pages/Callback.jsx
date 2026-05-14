@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 
 export default function Callback() {
@@ -10,17 +11,22 @@ export default function Callback() {
 
   useEffect(() => {
     const code = searchParams.get('code');
+    const state = searchParams.get('state');
+
     if (code) {
-      handleCallback(code).then(() => {
-        navigate('/dashboard');
-      }).catch((err) => {
-        console.error('Callback error:', err);
-        navigate('/');
-      });
+      handleCallback(code, state)
+        .then((redirectPath) => {
+          navigate(redirectPath || '/dashboard', { replace: true });
+        })
+        .catch((err) => {
+          console.error('Callback error:', err);
+          addToast(err?.message || 'Deriv login failed', 'error');
+          navigate('/', { replace: true });
+        });
     } else {
-      navigate('/');
+      navigate('/', { replace: true });
     }
-  }, [searchParams, handleCallback, navigate]);
+  }, [searchParams, handleCallback, navigate, addToast]);
 
   return <LoadingSpinner fullScreen />;
 }
