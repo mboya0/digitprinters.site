@@ -235,7 +235,7 @@ export const AuthProvider = ({ children }) => {
     const state = generateRandomState();
     const redirectPath = window.location.pathname === '/' ? '/dashboard' : window.location.pathname;
     storeAuthState(state, redirectPath);
-    const redirectUri = window.location.origin;
+    const redirectUri = DERIV_OAUTH_CONFIG.redirect_uri;
     const oauthUrl = `${DERIV_OAUTH_CONFIG.authorize_url}?response_type=code&client_id=${DERIV_OAUTH_CONFIG.client_id}&redirect_uri=${encodeURIComponent(
       redirectUri
     )}&scope=${encodeURIComponent(DERIV_OAUTH_CONFIG.scope)}&state=${state}`;
@@ -265,7 +265,7 @@ export const AuthProvider = ({ children }) => {
           },
           body: JSON.stringify({
             code,
-            redirect_uri: window.location.origin,
+            redirect_uri: DERIV_OAUTH_CONFIG.redirect_uri,
           }),
         });
 

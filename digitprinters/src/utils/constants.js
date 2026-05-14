@@ -50,6 +50,6 @@ export const API_ENDPOINTS = {
 export const DERIV_OAUTH_CONFIG = {
   authorize_url: 'https://oauth.deriv.com/oauth2/authorize',
   client_id: import.meta.env.VITE_DERIV_APP_ID || '332LK4VWd9A4pEEfTMn53',
-  redirect_uri: window.location.origin,
+  redirect_uri: import.meta.env.VITE_DERIV_OAUTH_REDIRECT_URI || window.location.origin,
   scope: 'read write',
 };

@@ -77,9 +77,11 @@ Update `.env` with your credentials:
 ```
 # Deriv Configuration - Get from https://deriv.com/app-registration
 VITE_DERIV_APP_ID=your_app_id
+VITE_DERIV_OAUTH_REDIRECT_URI=https://digitprinters.site
 
 # Use a secure server-side secret for OAuth token exchange on Vercel
 DERIV_OAUTH_CLIENT_SECRET=your_deriv_oauth_client_secret
+DERIV_OAUTH_REDIRECT_URI=https://digitprinters.site
 
 # Firebase Configuration - Get from Firebase Console
 VITE_FIREBASE_API_KEY=your_api_key

@@ -8,6 +8,7 @@ export default function Callback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { handleCallback } = useAuth();
+  const { addToast } = useToast();
 
   useEffect(() => {
     const code = searchParams.get('code');
