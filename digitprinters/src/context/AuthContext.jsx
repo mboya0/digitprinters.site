@@ -162,21 +162,6 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     }
   }, [deriv, logout, refreshToken]);
-      setError(null);
-
-      if (deriv) {
-        deriv.setToken(data.access_token);
-        await deriv.connect();
-      }
-
-      return data;
-    } catch (err) {
-      logout();
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [deriv, logout, refreshToken]);
 
   useEffect(() => {
     const derivInstance = initDeriv();
