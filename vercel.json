@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 2,
   "builds": [
     {
       "src": "package.json",
@@ -8,5 +8,6 @@
         "distDir": "digitprinters/dist"
       }
     }
-  ]
+  ],
+  "buildCommand": "npm run build"
 }
