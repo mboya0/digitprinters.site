@@ -53,7 +53,16 @@ const logOAuthError = (action, error) => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const { addToast } = useToast();
+  // Safe initialization with error handling
+  let addToast;
+  try {
+    const toastContext = useToast();
+    addToast = toastContext.addToast;
+  } catch (err) {
+    console.warn('[AuthContext] ToastContext not available, using fallback', err);
+    addToast = (message, type) => console.log(`[Toast Fallback] ${type}: ${message}`);
+  }
+
   const [user, setUser] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -63,225 +72,305 @@ export const AuthProvider = ({ children }) => {
   const [status, setStatus] = useState('disconnected');
   const [error, setError] = useState(null);
   const [websiteStatus, setWebsiteStatus] = useState(null);
-  const [accessToken, setAccessToken] = useState(localStorage.getItem('deriv_access_token'));
-  const [refreshToken, setRefreshToken] = useState(localStorage.getItem('deriv_refresh_token'));
-  const [tokenExpiry, setTokenExpiry] = useState(
-    Number(localStorage.getItem('deriv_token_expiry')) || null
-  );
+  const [accessToken, setAccessToken] = useState(() => {
+    try {
+      return localStorage.getItem('deriv_access_token');
+    } catch (err) {
+      console.warn('[AuthContext] Failed to read access token from localStorage', err);
+      return null;
+    }
+  });
+  const [refreshToken, setRefreshToken] = useState(() => {
+    try {
+      return localStorage.getItem('deriv_refresh_token');
+    } catch (err) {
+      console.warn('[AuthContext] Failed to read refresh token from localStorage', err);
+      return null;
+    }
+  });
+  const [tokenExpiry, setTokenExpiry] = useState(() => {
+    try {
+      return Number(localStorage.getItem('deriv_token_expiry')) || null;
+    } catch (err) {
+      console.warn('[AuthContext] Failed to read token expiry from localStorage', err);
+      return null;
+    }
+  });
   const [loginStatus, setLoginStatus] = useState(accessToken ? 'pending' : 'unauthenticated');
 
   const logout = useCallback(() => {
-    logOAuth('User logout initiated', { timestamp: new Date().toISOString() });
+    try {
+      logOAuth('User logout initiated', { timestamp: new Date().toISOString() });
 
-    setIsAuthenticated(false);
-    setUser(null);
-    setAccounts([]);
-    setSelectedAccount(null);
-    setAccessToken(null);
-    setRefreshToken(null);
-    setTokenExpiry(null);
-    setLoginStatus('unauthenticated');
-    setStatus('disconnected');
-    setWebsiteStatus(null);
-    setError(null);
-    localStorage.removeItem('deriv_access_token');
-    localStorage.removeItem('deriv_refresh_token');
-    localStorage.removeItem('deriv_token_expiry');
-    clearStoredAuthState();
-    if (deriv) {
-      deriv.disconnect();
+      setIsAuthenticated(false);
+      setUser(null);
+      setAccounts([]);
+      setSelectedAccount(null);
+      setAccessToken(null);
+      setRefreshToken(null);
+      setTokenExpiry(null);
+      setLoginStatus('unauthenticated');
+      setStatus('disconnected');
+      setWebsiteStatus(null);
+      setError(null);
+
+      // Safe localStorage operations
+      try {
+        localStorage.removeItem('deriv_access_token');
+        localStorage.removeItem('deriv_refresh_token');
+        localStorage.removeItem('deriv_token_expiry');
+        clearStoredAuthState();
+      } catch (err) {
+        console.warn('[AuthContext] Failed to clear localStorage during logout', err);
+      }
+
+      if (deriv) {
+        try {
+          deriv.disconnect();
+        } catch (err) {
+          console.warn('[AuthContext] Failed to disconnect websocket during logout', err);
+        }
+      }
+
+      logOAuth('Logout completed', {
+        timestamp: new Date().toISOString(),
+        tokensCleared: true,
+        websocketDisconnected: !!deriv,
+      });
+    } catch (err) {
+      console.error('[AuthContext] Logout error:', err);
+      // Force clear state even if logout fails
+      setIsAuthenticated(false);
+      setUser(null);
+      setAccounts([]);
+      setSelectedAccount(null);
+      setAccessToken(null);
+      setRefreshToken(null);
+      setTokenExpiry(null);
+      setLoginStatus('unauthenticated');
+      setStatus('disconnected');
+      setWebsiteStatus(null);
+      setError(null);
     }
-
-    logOAuth('Logout completed', {
-      timestamp: new Date().toISOString(),
-      tokensCleared: true,
-      websocketDisconnected: !!deriv,
-    });
   }, [deriv]);
 
   const refreshAccessToken = useCallback(async () => {
-    if (!refreshToken) {
-      logOAuth('Token refresh skipped - no refresh token', {});
-      return null;
-    }
-
-    setLoading(true);
-    logOAuth('Refreshing access token', { timestamp: new Date().toISOString() });
-
     try {
-      const response = await fetch('/api/oauth-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-          redirect_uri: DERIV_OAUTH_CONFIG.redirect_uri,
-        }),
-      });
-
-      const data = await response.json();
-
-      logOAuth('Token refresh response received', {
-        status: response.status,
-        hasAccessToken: !!data.access_token,
-        expiresIn: data.expires_in,
-      });
-
-      if (!response.ok || !data.access_token) {
-        throw new Error(data.error || 'Failed to refresh Deriv session');
+      if (!refreshToken) {
+        logOAuth('Token refresh skipped - no refresh token', {});
+        return null;
       }
 
-      const expiry = data.expires_in ? Date.now() + data.expires_in * 1000 : null;
-      localStorage.setItem('deriv_access_token', data.access_token);
-      localStorage.setItem('deriv_refresh_token', data.refresh_token || refreshToken);
-      if (expiry) localStorage.setItem('deriv_token_expiry', String(expiry));
+      setLoading(true);
+      logOAuth('Refreshing access token', { timestamp: new Date().toISOString() });
 
-      logOAuth('Tokens refreshed successfully', {
-        accessTokenLength: data.access_token.length,
-        expiresIn: data.expires_in,
-      });
+      try {
+        const response = await fetch('/api/oauth-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: refreshToken,
+            redirect_uri: DERIV_OAUTH_CONFIG.redirect_uri,
+          }),
+        });
 
-      setAccessToken(data.access_token);
-      setRefreshToken(data.refresh_token || refreshToken);
-      setTokenExpiry(expiry);
-      setLoginStatus('authenticated');
-      setError(null);
+        const data = await response.json();
 
-      if (deriv) {
-        deriv.setToken(data.access_token);
-        await deriv.connect();
+        logOAuth('Token refresh response received', {
+          status: response.status,
+          hasAccessToken: !!data.access_token,
+          expiresIn: data.expires_in,
+        });
+
+        if (!response.ok || !data.access_token) {
+          throw new Error(data.error || 'Failed to refresh Deriv session');
+        }
+
+        const expiry = data.expires_in ? Date.now() + data.expires_in * 1000 : null;
+        try {
+          localStorage.setItem('deriv_access_token', data.access_token);
+          localStorage.setItem('deriv_refresh_token', data.refresh_token || refreshToken);
+          if (expiry) localStorage.setItem('deriv_token_expiry', String(expiry));
+        } catch (storageErr) {
+          console.warn('[AuthContext] Failed to save tokens to localStorage:', storageErr);
+        }
+
+        logOAuth('Tokens refreshed successfully', {
+          accessTokenLength: data.access_token.length,
+          expiresIn: data.expires_in,
+        });
+
+        setAccessToken(data.access_token);
+        setRefreshToken(data.refresh_token || refreshToken);
+        setTokenExpiry(expiry);
+        setLoginStatus('authenticated');
+        setError(null);
+
+        if (deriv) {
+          deriv.setToken(data.access_token);
+          await deriv.connect();
+        }
+
+        return data;
+      } catch (err) {
+        const errorMsg = err?.message || 'Token refresh failed';
+        logOAuthError('Token refresh failed', { error: errorMsg });
+        logout();
+        throw err;
+      } finally {
+        setLoading(false);
       }
-
-      return data;
-    } catch (err) {
-      const errorMsg = err?.message || 'Token refresh failed';
-      logOAuthError('Token refresh failed', { error: errorMsg });
-      logout();
-      throw err;
-    } finally {
+    } catch (outerErr) {
+      console.error('[AuthContext] Critical error in refreshAccessToken:', outerErr);
       setLoading(false);
+      throw outerErr;
     }
   }, [deriv, logout, refreshToken]);
 
   useEffect(() => {
-    const derivInstance = initDeriv();
-    setDeriv(derivInstance);
+    try {
+      const derivInstance = initDeriv();
+      setDeriv(derivInstance);
 
-    const updateStatus = (nextStatus) => {
-      setStatus(nextStatus);
-      if (nextStatus === 'connected') {
-        addToast('Connected to Deriv and streaming live data', 'success');
-      } else if (nextStatus === 'disconnected') {
-        addToast('Connection lost. Reconnecting automatically...', 'warning');
-      } else if (nextStatus === 'error') {
-        addToast('Deriv websocket reported an error', 'error');
-      }
-    };
+      const updateStatus = (nextStatus) => {
+        try {
+          setStatus(nextStatus);
+          if (nextStatus === 'connected') {
+            addToast('Connected to Deriv and streaming live data', 'success');
+          } else if (nextStatus === 'disconnected') {
+            addToast('Connection lost. Reconnecting automatically...', 'warning');
+          } else if (nextStatus === 'error') {
+            addToast('Deriv websocket reported an error', 'error');
+          }
+        } catch (err) {
+          console.warn('[AuthContext] Error updating status:', err);
+        }
+      };
 
-    const handleError = (err) => {
-      const message = err?.message || String(err);
-      setError(message);
-      addToast(`Deriv error: ${message}`, 'error');
-    };
+      const handleError = (err) => {
+        try {
+          const message = err?.message || String(err);
+          setError(message);
+          addToast(`Deriv error: ${message}`, 'error');
+        } catch (toastErr) {
+          console.warn('[AuthContext] Error handling error:', toastErr);
+        }
+      };
 
-    const handleAuthorized = async (data) => {
-      setLoginStatus('authenticated');
-      setIsAuthenticated(true);
-      setError(null);
+      const handleAuthorized = async (data) => {
+        try {
+          setLoginStatus('authenticated');
+          setIsAuthenticated(true);
+          setError(null);
 
-      const account = data.authorize?.account || {};
-      setUser({
-        accountId: account.account_number || account.loginid || 'Unknown',
-        balance: Number(account.balance || 0),
-        currency: account.currency || 'USD',
-        email: account.email || '',
-        accountType:
-          account.is_virtual || account.account_type === 'virtual' ? 'Demo' : 'Real',
-      });
+          const account = data.authorize?.account || {};
+          setUser({
+            accountId: account.account_number || account.loginid || 'Unknown',
+            balance: Number(account.balance || 0),
+            currency: account.currency || 'USD',
+            email: account.email || '',
+            accountType:
+              account.is_virtual || account.account_type === 'virtual' ? 'Demo' : 'Real',
+          });
 
-      try {
-        const accountListResponse = await derivInstance.getAccountList();
-        const fetchedAccounts = Array.isArray(accountListResponse.account_list)
-          ? accountListResponse.account_list
-          : [];
-        setAccounts(fetchedAccounts);
-        const authorizedAccount = fetchedAccounts.find(
-          (acc) => acc.account_number === account.account_number || acc.loginid === account.loginid
-        );
-        setSelectedAccount(authorizedAccount || fetchedAccounts[0] || null);
-      } catch (err) {
-        console.error('Error fetching accounts:', err);
-      }
-    };
+          try {
+            const accountListResponse = await derivInstance.getAccountList();
+            const fetchedAccounts = Array.isArray(accountListResponse.account_list)
+              ? accountListResponse.account_list
+              : [];
+            setAccounts(fetchedAccounts);
+            const authorizedAccount = fetchedAccounts.find(
+              (acc) => acc.account_number === account.account_number || acc.loginid === account.loginid
+            );
+            setSelectedAccount(authorizedAccount || fetchedAccounts[0] || null);
+          } catch (err) {
+            console.error('Error fetching accounts:', err);
+          }
+        } catch (err) {
+          console.error('[AuthContext] Error in handleAuthorized:', err);
+          handleError(err);
+        }
+      };
 
-    const fetchAccounts = async () => {
-      if (!derivInstance || !derivInstance.isConnected()) return;
-      try {
-        const response = await derivInstance.getAccountList();
-        const refreshedAccounts = Array.isArray(response.account_list)
-          ? response.account_list
-          : [];
-        setAccounts(refreshedAccounts);
-      } catch (err) {
-        console.error('Error refreshing accounts:', err);
-      }
-    };
+      const fetchAccounts = async () => {
+        if (!derivInstance || !derivInstance.isConnected()) return;
+        try {
+          const response = await derivInstance.getAccountList();
+          const refreshedAccounts = Array.isArray(response.account_list)
+            ? response.account_list
+            : [];
+          setAccounts(refreshedAccounts);
+        } catch (err) {
+          console.error('Error refreshing accounts:', err);
+        }
+      };
 
-    const connect = async () => {
-      try {
-        logOAuth('Connecting to Deriv websocket', { timestamp: new Date().toISOString() });
-        await derivInstance.connect();
-        const statusResponse = await derivInstance.getWebsiteStatus();
-        setWebsiteStatus(statusResponse.website_status || null);
-        logOAuth('Websocket connected and website status retrieved', {
-          timestamp: new Date().toISOString(),
-        });
-        await fetchAccounts();
-      } catch (err) {
-        handleError(err);
-      } finally {
+      const connect = async () => {
+        try {
+          logOAuth('Connecting to Deriv websocket', { timestamp: new Date().toISOString() });
+          await derivInstance.connect();
+          const statusResponse = await derivInstance.getWebsiteStatus();
+          setWebsiteStatus(statusResponse.website_status || null);
+          logOAuth('Websocket connected and website status retrieved', {
+            timestamp: new Date().toISOString(),
+          });
+          await fetchAccounts();
+        } catch (err) {
+          handleError(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const unsubStatus = derivInstance.on('status', updateStatus);
+      const unsubError = derivInstance.on('error', handleError);
+      const unsubAuthorized = derivInstance.on('authorized', handleAuthorized);
+
+      let refreshTimer = null;
+      const scheduleRefresh = () => {
+        if (!tokenExpiry || !refreshToken) return;
+        const msUntilRefresh = tokenExpiry - Date.now() - 120000;
+        if (msUntilRefresh <= 0) {
+          refreshAccessToken().catch(() => {});
+          return;
+        }
+        refreshTimer = window.setTimeout(() => {
+          refreshAccessToken().catch(() => {});
+        }, msUntilRefresh);
+      };
+
+      if (accessToken) {
+        derivInstance.setToken(accessToken);
+        if (tokenExpiry && Date.now() > tokenExpiry && refreshToken) {
+          refreshAccessToken().catch(() => {});
+        } else {
+          connect();
+        }
+        scheduleRefresh();
+      } else {
         setLoading(false);
       }
-    };
 
-    const unsubStatus = derivInstance.on('status', updateStatus);
-    const unsubError = derivInstance.on('error', handleError);
-    const unsubAuthorized = derivInstance.on('authorized', handleAuthorized);
-
-    let refreshTimer = null;
-    const scheduleRefresh = () => {
-      if (!tokenExpiry || !refreshToken) return;
-      const msUntilRefresh = tokenExpiry - Date.now() - 120000;
-      if (msUntilRefresh <= 0) {
-        refreshAccessToken().catch(() => {});
-        return;
-      }
-      refreshTimer = window.setTimeout(() => {
-        refreshAccessToken().catch(() => {});
-      }, msUntilRefresh);
-    };
-
-    if (accessToken) {
-      derivInstance.setToken(accessToken);
-      if (tokenExpiry && Date.now() > tokenExpiry && refreshToken) {
-        refreshAccessToken().catch(() => {});
-      } else {
-        connect();
-      }
-      scheduleRefresh();
-    } else {
+      return () => {
+        try {
+          unsubStatus();
+          unsubError();
+          unsubAuthorized();
+          if (refreshTimer) {
+            clearTimeout(refreshTimer);
+          }
+          derivInstance.disconnect();
+        } catch (err) {
+          console.warn('[AuthContext] Error during cleanup:', err);
+        }
+      };
+    } catch (err) {
+      console.error('[AuthContext] Critical error in useEffect initialization:', err);
+      setError('Failed to initialize authentication');
       setLoading(false);
+      setStatus('error');
     }
-
-    return () => {
-      unsubStatus();
-      unsubError();
-      unsubAuthorized();
-      if (refreshTimer) {
-        clearTimeout(refreshTimer);
-      }
-      derivInstance.disconnect();
-    };
   }, [accessToken, addToast, refreshAccessToken, refreshToken, tokenExpiry]);
 
   const login = useCallback(() => {
@@ -470,31 +559,61 @@ export const AuthProvider = ({ children }) => {
     }
   }, [deriv, accessToken]);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        accounts,
-        selectedAccount,
-        setSelectedAccount,
-        isAuthenticated,
-        loading,
-        deriv,
-        status,
-        error,
-        websiteStatus,
-        accessToken,
-        login,
-        handleCallback,
-        connectDeriv,
-        authorize,
-        logout,
-        loginStatus,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  try {
+    return (
+      <AuthContext.Provider
+        value={{
+          user,
+          accounts,
+          selectedAccount,
+          setSelectedAccount,
+          isAuthenticated,
+          loading,
+          deriv,
+          status,
+          error,
+          websiteStatus,
+          accessToken,
+          login,
+          handleCallback,
+          connectDeriv,
+          authorize,
+          logout,
+          loginStatus,
+        }}
+      >
+        {children}
+      </AuthContext.Provider>
+    );
+  } catch (err) {
+    console.error('[AuthContext] Critical error in AuthProvider render:', err);
+    // Fallback UI to prevent blank screen
+    return (
+      <AuthContext.Provider
+        value={{
+          user: null,
+          accounts: [],
+          selectedAccount: null,
+          setSelectedAccount: () => {},
+          isAuthenticated: false,
+          loading: false,
+          deriv: null,
+          status: 'error',
+          error: 'Authentication system failed to initialize',
+          websiteStatus: null,
+          accessToken: null,
+          login: () => {},
+          handleCallback: () => {},
+          connectDeriv: () => {},
+          authorize: () => {},
+          logout: () => {},
+          loginStatus: 'error',
+        }}
+      >
+        {children}
+      </AuthContext.Provider>
+    );
+  }
 };
 
 export const useAuth = () => {

@@ -1,18 +1,22 @@
-﻿import { useEffect } from 'react';
+﻿import React, { useEffect, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ToastProvider } from './context/ToastContext';
-import { AuthProvider } from './context/AuthContext';
-import { TradingProvider } from './context/TradingContext';
-import Navbar from './components/common/Navbar';
-import Home from './pages/Home';
-import Dashboard from './pages/Dashboard';
-import Trading from './pages/Trading';
-import Bots from './pages/Bots';
-import CopyTrading from './pages/CopyTrading';
-import AIAnalysis from './pages/AIAnalysis';
-import Settings from './pages/Settings';
-import Callback from './pages/Callback';
-import ProtectedRoute from './components/common/ProtectedRoute';
+import ErrorBoundary from './components/common/ErrorBoundary';
+import LoadingSpinner from './components/common/LoadingSpinner';
+
+// Lazy load components to prevent import errors from crashing the app
+const ToastProvider = React.lazy(() => import('./context/ToastContext').then(module => ({ default: module.ToastProvider })));
+const AuthProvider = React.lazy(() => import('./context/AuthContext').then(module => ({ default: module.AuthProvider })));
+const TradingProvider = React.lazy(() => import('./context/TradingContext').then(module => ({ default: module.TradingProvider })));
+const Navbar = React.lazy(() => import('./components/common/Navbar'));
+const Home = React.lazy(() => import('./pages/Home'));
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const Trading = React.lazy(() => import('./pages/Trading'));
+const Bots = React.lazy(() => import('./pages/Bots'));
+const CopyTrading = React.lazy(() => import('./pages/CopyTrading'));
+const AIAnalysis = React.lazy(() => import('./pages/AIAnalysis'));
+const Settings = React.lazy(() => import('./pages/Settings'));
+const Callback = React.lazy(() => import('./pages/Callback'));
+const ProtectedRoute = React.lazy(() => import('./components/common/ProtectedRoute'));
 
 const CANONICAL_HOST = 'digitprinters.site';
 
@@ -23,6 +27,152 @@ const logApp = (msg, data) => {
   });
 };
 
+// Safe redirect component that doesn't crash
+const SafeRedirect = ({ to, replace = true }) => {
+  useEffect(() => {
+    logApp('Safe redirect triggered', { to, replace });
+    try {
+      window.location.replace(to);
+    } catch (error) {
+      logApp('Redirect failed, using fallback', { error: error.message });
+      window.location.href = to;
+    }
+  }, [to, replace]);
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+      <LoadingSpinner />
+    </div>
+  );
+};
+
+// Loading fallback component
+const LoadingFallback = () => (
+  <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center">
+    <LoadingSpinner />
+  </div>
+);
+
+// Safe App component that handles errors gracefully
+function SafeApp() {
+  useEffect(() => {
+    logApp('SafeApp component mounted', {
+      userAgent: navigator.userAgent,
+      url: window.location.href,
+      timestamp: new Date().toISOString(),
+    });
+  }, []);
+
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <ToastProvider>
+          <AuthProvider>
+            <TradingProvider>
+              <BrowserRouter>
+                <ErrorBoundary>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <Navbar />
+                  </Suspense>
+                </ErrorBoundary>
+                <Routes>
+                  {/* Public routes */}
+                  <Route path="/" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<LoadingFallback />}>
+                        <Home />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+
+                  {/* OAuth callback routes - support multiple paths for flexibility */}
+                  <Route path="/auth/callback" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<LoadingFallback />}>
+                        <Callback />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/callback" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<LoadingFallback />}>
+                        <Callback />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+                  <Route path="/oauth/callback" element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<LoadingFallback />}>
+                        <Callback />
+                      </Suspense>
+                    </ErrorBoundary>
+                  } />
+
+                  {/* Protected routes */}
+                  <Route element={
+                    <ErrorBoundary>
+                      <Suspense fallback={<LoadingFallback />}>
+                        <ProtectedRoute />
+                      </Suspense>
+                    </ErrorBoundary>
+                  }>
+                    <Route path="/dashboard" element={
+                      <ErrorBoundary>
+                        <Suspense fallback={<LoadingFallback />}>
+                          <Dashboard />
+                        </Suspense>
+                      </ErrorBoundary>
+                    } />
+                    <Route path="/trading" element={
+                      <ErrorBoundary>
+                        <Suspense fallback={<LoadingFallback />}>
+                          <Trading />
+                        </Suspense>
+                      </ErrorBoundary>
+                    } />
+                    <Route path="/bots" element={
+                      <ErrorBoundary>
+                        <Suspense fallback={<LoadingFallback />}>
+                          <Bots />
+                        </Suspense>
+                      </ErrorBoundary>
+                    } />
+                    <Route path="/copy-trading" element={
+                      <ErrorBoundary>
+                        <Suspense fallback={<LoadingFallback />}>
+                          <CopyTrading />
+                        </Suspense>
+                      </ErrorBoundary>
+                    } />
+                    <Route path="/ai-analysis" element={
+                      <ErrorBoundary>
+                        <Suspense fallback={<LoadingFallback />}>
+                          <AIAnalysis />
+                        </Suspense>
+                      </ErrorBoundary>
+                    } />
+                    <Route path="/settings" element={
+                      <ErrorBoundary>
+                        <Suspense fallback={<LoadingFallback />}>
+                          <Settings />
+                        </Suspense>
+                      </ErrorBoundary>
+                    } />
+                  </Route>
+
+                  {/* Catch-all redirect to home */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </BrowserRouter>
+            </TradingProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+// Main App component with safe initialization
 function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -36,52 +186,22 @@ function App() {
       hostname: currentHost,
       pathname: currentPath,
       isCanonical: currentHost === CANONICAL_HOST,
+      userAgent: navigator.userAgent?.substring(0, 100),
     });
 
-    // Redirect www to non-www for production
-    if (currentHost === `www.${CANONICAL_HOST}`) {
-      const destination = `https://${CANONICAL_HOST}${currentPath}${currentSearch}${currentHash}`;
+    // Only redirect if we're definitely on www subdomain and not in a redirect loop
+    if (currentHost === `www.${CANONICAL_HOST}` && !currentSearch.includes('redirected')) {
+      const destination = `https://${CANONICAL_HOST}${currentPath}${currentSearch}${currentHash}&redirected=1`;
       logApp('Redirecting from www to canonical host', {
         from: currentHost,
         to: destination,
       });
-      window.location.replace(destination);
+      // Use SafeRedirect component instead of direct window.location
+      return;
     }
   }, []);
 
-  return (
-    <ToastProvider>
-      <AuthProvider>
-        <TradingProvider>
-          <BrowserRouter>
-            <Navbar />
-            <Routes>
-              {/* Public routes */}
-              <Route path="/" element={<Home />} />
-              
-              {/* OAuth callback routes - support multiple paths for flexibility */}
-              <Route path="/auth/callback" element={<Callback />} />
-              <Route path="/callback" element={<Callback />} />
-              <Route path="/oauth/callback" element={<Callback />} />
-              
-              {/* Protected routes */}
-              <Route element={<ProtectedRoute />}>
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/trading" element={<Trading />} />
-                <Route path="/bots" element={<Bots />} />
-                <Route path="/copy-trading" element={<CopyTrading />} />
-                <Route path="/ai-analysis" element={<AIAnalysis />} />
-                <Route path="/settings" element={<Settings />} />
-              </Route>
-              
-              {/* Catch-all redirect to home */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </BrowserRouter>
-        </TradingProvider>
-      </AuthProvider>
-    </ToastProvider>
-  );
+  return <SafeApp />;
 }
 
 export default App;
