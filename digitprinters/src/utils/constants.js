@@ -47,9 +47,31 @@ export const API_ENDPOINTS = {
   WEBSITE_STATUS: '/website_status',
 };
 
+// Production canonical URL
+const CANONICAL_APP_URL = 'https://digitprinters.site';
+
+/**
+ * Deriv OAuth Configuration
+ * Uses official OAuth 2.0 endpoint with proper scopes and redirect handling
+ */
 export const DERIV_OAUTH_CONFIG = {
   authorize_url: 'https://oauth.deriv.com/oauth2/authorize',
+  token_url: 'https://oauth.deriv.com/oauth2/token',
   client_id: import.meta.env.VITE_DERIV_APP_ID || '332LK4VWd9A4pEEfTMn53',
-  redirect_uri: import.meta.env.VITE_DERIV_OAUTH_REDIRECT_URI || window.location.origin,
+  redirect_uri:
+    import.meta.env.VITE_DERIV_OAUTH_REDIRECT_URI || `${CANONICAL_APP_URL}/auth/callback`,
   scope: 'read write',
+  response_type: 'code',
+};
+
+/**
+ * Logging configuration for OAuth debugging
+ */
+export const OAUTH_LOGGING = {
+  enabled: true,
+  logUrlGeneration: true,
+  logCallbackParsing: true,
+  logTokenExchange: true,
+  logWebsocketAuth: true,
+  logRedirects: true,
 };

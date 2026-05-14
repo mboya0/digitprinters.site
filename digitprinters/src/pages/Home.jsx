@@ -1,32 +1,40 @@
 import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
 import Button from '../components/common/Button';
 import Logo from '../components/common/Logo';
 
+// Deriv referral link - only used for Create Account button
 const DERIV_REFERRAL = 'https://partner-tracking.deriv.com/click?a=14252&o=1&c=3&link_id=1';
 
+const logHome = (msg, data) => {
+  console.info(`[Home] ${msg}`, {
+    ...data,
+    timestamp: new Date().toISOString(),
+  });
+};
+
 export default function Home() {
-  const { login, handleCallback, isAuthenticated, loading } = useAuth();
-  const [searchParams] = useSearchParams();
+  const { login, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
-  const { addToast } = useToast();
 
+  // Redirect to dashboard if already authenticated
   useEffect(() => {
-    const code = searchParams.get('code');
-    const state = searchParams.get('state');
-    if (!code) return;
+    if (isAuthenticated && !loading) {
+      logHome('User already authenticated, redirecting to dashboard', {});
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, loading, navigate]);
 
-    handleCallback(code, state)
-      .then((redirectPath) => {
-        navigate(redirectPath || '/dashboard', { replace: true });
-      })
-      .catch((err) => {
-        addToast(err?.message || 'Deriv login failed', 'error');
-        navigate('/', { replace: true });
-      });
-  }, [searchParams, handleCallback, navigate, addToast]);
+  const handleLoginClick = () => {
+    logHome('Login button clicked', {
+      isAuthenticated,
+      loading,
+    });
+    if (!isAuthenticated && !loading) {
+      login();
+    }
+  };
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-white">
@@ -53,18 +61,12 @@ export default function Home() {
 
             <div className="flex w-full flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Button
-                onClick={() => {
-                  if (isAuthenticated) {
-                    navigate('/dashboard');
-                  } else {
-                    login();
-                  }
-                }}
+                onClick={handleLoginClick}
                 disabled={loading}
                 className="w-full max-w-[260px] bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 shadow-[0_20px_80px_rgba(34,211,238,0.24)] transition duration-300 hover:scale-[1.01] hover:from-cyan-300 hover:to-sky-400"
                 size="lg"
               >
-                {isAuthenticated ? 'Continue to Dashboard' : 'Login with Deriv'}
+                {loading ? 'Loading...' : 'Login with Deriv'}
               </Button>
               <a
                 href={DERIV_REFERRAL}

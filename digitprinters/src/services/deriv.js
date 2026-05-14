@@ -1,6 +1,22 @@
 const DERIV_APP_ID = import.meta.env.VITE_DERIV_APP_ID || '332LK4VWd9A4pEEfTMn53';
 const DERIV_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${DERIV_APP_ID}`;
 
+// ==================== Logging Utilities ====================
+const logWebSocket = (action, data) => {
+  console.info(`[DerivWS] ${action}`, {
+    ...data,
+    timestamp: new Date().toISOString(),
+  });
+};
+
+const logWebSocketError = (action, error) => {
+  console.error(`[DerivWS Error] ${action}`, {
+    error: error?.message || String(error),
+    stack: error?.stack,
+    timestamp: new Date().toISOString(),
+  });
+};
+
 class DerivWebSocket {
   constructor(url = DERIV_WS_URL) {
     this.url = url;
@@ -20,10 +36,18 @@ class DerivWebSocket {
 
   setToken(token) {
     this.token = token;
+    logWebSocket('Token set for websocket authorization', {
+      tokenLength: token?.length || 0,
+      hasToken: !!token,
+    });
   }
 
   async connect() {
     if (this.isConnected() && this.authorized) {
+      logWebSocket('Already connected and authorized, skipping reconnect', {
+        isConnected: this.isConnected(),
+        isAuthorized: this.authorized,
+      });
       return Promise.resolve();
     }
 
@@ -31,6 +55,12 @@ class DerivWebSocket {
       try {
         this.status = 'connecting';
         this.emit('status', this.status);
+
+        logWebSocket('Initiating websocket connection', {
+          url: this.url,
+          hasToken: !!this.token,
+          status: this.status,
+        });
 
         this.ws = new WebSocket(this.url);
 
@@ -40,15 +70,23 @@ class DerivWebSocket {
           this.emit('connected');
           this.emit('status', 'authorizing');
 
+          logWebSocket('Websocket connection established, authorizing...', {
+            hasToken: !!this.token,
+          });
+
           try {
             await this.authorize();
             this.status = 'connected';
             this.emit('status', this.status);
+            logWebSocket('Websocket authorized successfully', {
+              authorized: this.authorized,
+            });
             await this.restoreSubscriptions();
             resolve();
           } catch (err) {
             this.status = 'error';
             this.emit('status', this.status);
+            logWebSocketError('Websocket authorization failed', err);
             reject(err);
           }
         };
@@ -58,11 +96,13 @@ class DerivWebSocket {
             const data = JSON.parse(event.data);
             this.handleMessage(data);
           } catch (err) {
+            logWebSocketError('Failed to parse websocket message', err);
             this.emit('error', err);
           }
         };
 
         this.ws.onerror = (error) => {
+          logWebSocketError('Websocket error occurred', error);
           this.emit('error', error);
           reject(error);
         };
@@ -72,6 +112,10 @@ class DerivWebSocket {
           this.authorized = false;
           this.emit('disconnected');
           this.emit('status', this.status);
+          logWebSocket('Websocket connection closed', {
+            intentionallyClosed: this.isIntentionallyClosed,
+            reconnectAttempts: this.reconnectAttempts,
+          });
           if (!this.isIntentionallyClosed) {
             this.attemptReconnect();
           }
@@ -79,6 +123,7 @@ class DerivWebSocket {
       } catch (err) {
         this.status = 'error';
         this.emit('status', this.status);
+        logWebSocketError('Websocket initialization failed', err);
         reject(err);
       }
     });
@@ -142,20 +187,40 @@ class DerivWebSocket {
 
   async authorize(token) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket must be open to authorize');
+      const errorMsg = 'WebSocket must be open to authorize';
+      logWebSocketError('Authorization failed - websocket not open', { readyState: this.ws?.readyState });
+      throw new Error(errorMsg);
     }
 
     const authToken = token || this.token;
     if (!authToken) {
-      throw new Error('No token provided for authorization');
+      const errorMsg = 'No token provided for authorization';
+      logWebSocketError('Authorization failed - no token', {});
+      throw new Error(errorMsg);
     }
 
+    logWebSocket('Sending authorization request to websocket', {
+      tokenLength: authToken.length,
+      wsReadyState: this.ws.readyState,
+    });
+
     const response = await this.send({ authorize: authToken });
+    
     if (response.error) {
-      throw new Error(response.error.message || 'Authorization failed');
+      const errorMsg = response.error.message || 'Authorization failed';
+      logWebSocketError('Authorization error from Deriv', {
+        error: response.error.message,
+        errorCode: response.error.code,
+      });
+      throw new Error(errorMsg);
     }
 
     this.authorized = true;
+    logWebSocket('Websocket authorization successful', {
+      accountNumber: response.authorize?.account_number,
+      loginId: response.authorize?.loginid,
+      isVirtual: response.authorize?.is_virtual,
+    });
     this.emit('authorized', response);
     return response;
   }
