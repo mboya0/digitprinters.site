@@ -1,160 +1,121 @@
 /**
  * Trading Context
- * Manages trading state, open contracts, and market data
+ * Manages core trading state, open contracts, and live market data.
  */
 
-import { createContext, useContext, useCallback, useState, useEffect } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from './AuthContext';
+import { useSymbols } from '../hooks/useSymbols';
 
 const TradingContext = createContext(null);
 
 export const TradingProvider = ({ children }) => {
-  const { deriv } = useAuth();
-  const [balance, setBalance] = useState(0);
-  const [openContracts, setOpenContracts] = useState([]);
-  const [marketData, setMarketData] = useState({});
-  const [selectedSymbol, setSelectedSymbol] = useState('R_25');
+  const { deriv, status: derivStatus, error: derivError } = useAuth();
+  const { symbols: activeSymbols, loading: symbolsLoading, error: symbolsError, refreshSymbols } = useSymbols();
+  const [selectedSymbol, setSelectedSymbol] = useState('');
   const [selectedTimeframe, setSelectedTimeframe] = useState(60);
-  const [loading, setLoading] = useState(false);
+  const [balance, setBalance] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [websiteStatus, setWebsiteStatus] = useState(null);
 
-  const SYNTHETIC_INDICES = [
-    { code: 'R_10', name: 'Volatility 10', multiplier: 10 },
-    { code: 'R_25', name: 'Volatility 25', multiplier: 25 },
-    { code: 'R_50', name: 'Volatility 50', multiplier: 50 },
-    { code: 'R_75', name: 'Volatility 75', multiplier: 75 },
-    { code: 'R_100', name: 'Volatility 100', multiplier: 100 },
-  ];
+  useEffect(() => {
+    if (activeSymbols.length && !selectedSymbol) {
+      setSelectedSymbol(activeSymbols[0].symbol);
+    }
+  }, [activeSymbols, selectedSymbol]);
 
-  // Fetch balance
   const fetchBalance = useCallback(async () => {
     if (!deriv || !deriv.isConnected()) return;
 
     try {
-      const response = await deriv.send({ balance: 1 });
-      if (response.balance) {
-        setBalance(response.balance.balance);
-      }
+      const response = await deriv.getBalance();
+      setBalance(response.balance?.balance || 0);
     } catch (err) {
       console.error('Error fetching balance:', err);
+      setError(err.message || 'Balance request failed');
     }
   }, [deriv]);
 
-  // Subscribe to balance updates
   useEffect(() => {
     if (!deriv || !deriv.isConnected()) return;
 
-    const unsubscribe = deriv.on('message', (data) => {
-      if (data.balance) {
-        setBalance(data.balance.balance);
-      }
-    });
+    setLoading(true);
+    fetchBalance();
+    const refresh = setInterval(fetchBalance, 30000);
 
-    return unsubscribe;
+    return () => clearInterval(refresh);
+  }, [deriv, fetchBalance]);
+
+  useEffect(() => {
+    if (!deriv || !deriv.isConnected()) return;
+
+    deriv
+      .getWebsiteStatus()
+      .then((response) => setWebsiteStatus(response.website_status || null))
+      .catch((err) => setError(err.message || 'Unable to fetch website status'));
   }, [deriv]);
 
-  // Subscribe to ticks for selected symbol
   useEffect(() => {
-    if (!deriv || !deriv.isConnected()) return;
+    setError(derivError || symbolsError || null);
+    setLoading(derivStatus === 'connecting' || symbolsLoading);
+  }, [derivError, symbolsError, derivStatus, symbolsLoading]);
 
-    deriv.subscribeTicks(selectedSymbol, (tick) => {
-      setMarketData((prev) => ({
-        ...prev,
-        [selectedSymbol]: {
-          ...prev[selectedSymbol],
-          lastTick: tick,
-          bid: tick.bid,
-          ask: tick.ask,
-          bid_display: tick.bid_display,
-          ask_display: tick.ask_display,
-          timestamp: tick.epoch * 1000,
-        },
-      }));
-    });
-  }, [deriv, selectedSymbol]);
-
-  const placeTrade = useCallback(
-    async (proposal) => {
-      if (!deriv) {
-        setError('Deriv not connected');
-        return;
+  const requestProposal = useCallback(
+    async ({ symbol, amount, duration, durationUnit, contractType }) => {
+      if (!deriv || !deriv.isConnected()) {
+        throw new Error('Deriv is not connected');
       }
 
-      try {
-        setLoading(true);
-        const response = await deriv.send({
-          proposal: 1,
-          ...proposal,
-        });
-        return response;
-      } catch (err) {
-        setError(err.message);
-        throw err;
-      } finally {
-        setLoading(false);
-      }
+      return deriv.getProposal({
+        amount,
+        basis: 'stake',
+        contract_type: contractType,
+        currency: 'USD',
+        duration,
+        duration_unit: durationUnit,
+        symbol,
+      });
     },
     [deriv]
   );
 
   const buyContract = useCallback(
-    async (contractId, price) => {
-      if (!deriv) {
-        setError('Deriv not connected');
-        return;
+    async (contractProposal) => {
+      if (!deriv || !deriv.isConnected()) {
+        throw new Error('Deriv is not connected');
       }
 
-      try {
-        setLoading(true);
-        const response = await deriv.send({
-          buy: contractId,
-          price: price,
-        });
-        // Refresh balance and contracts
-        await fetchBalance();
-        return response;
-      } catch (err) {
-        setError(err.message);
-        throw err;
-      } finally {
-        setLoading(false);
-      }
+      const response = await deriv.buyContract(contractProposal);
+      await fetchBalance();
+      return response;
     },
     [deriv, fetchBalance]
   );
 
-  const getActiveSymbols = useCallback(async () => {
-    if (!deriv) return [];
-
-    try {
-      const response = await deriv.send({
-        active_symbols: 'brief',
-        product_type: 'synthetic_index',
-      });
-      return response.active_symbols || [];
-    } catch (err) {
-      console.error('Error getting active symbols:', err);
-      return [];
-    }
-  }, [deriv]);
+  const syntheticIndices = useMemo(
+    () => activeSymbols.map((item) => ({ code: item.symbol, name: item.name })),
+    [activeSymbols]
+  );
 
   return (
     <TradingContext.Provider
       value={{
         balance,
-        openContracts,
-        marketData,
+        activeSymbols,
+        syntheticIndices,
         selectedSymbol,
         selectedTimeframe,
         loading,
         error,
-        SYNTHETIC_INDICES,
+        websiteStatus,
+        derivStatus,
         setSelectedSymbol,
         setSelectedTimeframe,
         fetchBalance,
-        placeTrade,
+        refreshSymbols,
+        requestProposal,
         buyContract,
-        getActiveSymbols,
       }}
     >
       {children}

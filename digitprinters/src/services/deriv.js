@@ -1,35 +1,39 @@
-/**
- * Deriv WebSocket Service
- * Handles connection, reconnection, and communication with Deriv API
- */
+const DERIV_APP_ID = '332LK4VWd9A4pEEfTMn53';
+const DERIV_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${DERIV_APP_ID}`;
 
 class DerivWebSocket {
-  constructor(appId) {
-    this.appId = appId;
+  constructor(url = DERIV_WS_URL) {
+    this.url = url;
     this.ws = null;
     this.messageId = 1;
     this.listeners = {};
     this.pendingRequests = {};
+    this.subscriptions = {};
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 3000;
+    this.maxReconnectAttempts = 7;
+    this.reconnectDelay = 2000;
     this.isIntentionallyClosed = false;
+    this.status = 'disconnected';
   }
 
-  /**
-   * Connect to Deriv WebSocket
-   */
   connect() {
+    if (this.isConnected()) {
+      return Promise.resolve();
+    }
+
     return new Promise((resolve, reject) => {
       try {
-        const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${this.appId}`;
-        this.ws = new WebSocket(wsUrl);
+        this.status = 'connecting';
+        this.emit('status', this.status);
+
+        this.ws = new WebSocket(this.url);
 
         this.ws.onopen = () => {
-          console.log('✅ Connected to Deriv WebSocket');
+          this.status = 'connected';
           this.reconnectAttempts = 0;
           this.isIntentionallyClosed = false;
-          this.emit('connected', { timestamp: new Date() });
+          this.emit('connected');
+          this.emit('status', this.status);
           resolve();
         };
 
@@ -38,34 +42,32 @@ class DerivWebSocket {
             const data = JSON.parse(event.data);
             this.handleMessage(data);
           } catch (err) {
-            console.error('Error parsing message:', err);
+            this.emit('error', err);
           }
         };
 
         this.ws.onerror = (error) => {
-          console.error('❌ WebSocket Error:', error);
           this.emit('error', error);
           reject(error);
         };
 
         this.ws.onclose = () => {
-          console.log('🔌 Disconnected from Deriv WebSocket');
-          this.emit('disconnected', { timestamp: new Date() });
+          this.status = 'disconnected';
+          this.emit('disconnected');
+          this.emit('status', this.status);
           if (!this.isIntentionallyClosed) {
             this.attemptReconnect();
           }
         };
       } catch (err) {
+        this.status = 'error';
+        this.emit('status', this.status);
         reject(err);
       }
     });
   }
 
-  /**
-   * Handle incoming messages from Deriv
-   */
   handleMessage(data) {
-    // Handle responses to pending requests
     if (data.req_id && this.pendingRequests[data.req_id]) {
       const callback = this.pendingRequests[data.req_id];
       delete this.pendingRequests[data.req_id];
@@ -73,46 +75,42 @@ class DerivWebSocket {
       return;
     }
 
-    // Handle subscriptions (push updates)
-    if (data.subscription) {
-      this.emit(`subscribe:${data.subscription.id}`, data);
+    if (data.subscription && data.subscription.id) {
+      this.emit(`subscription:${data.subscription.id}`, data);
     }
 
-    // Emit generic message event
+    if (data.tick && data.tick.symbol) {
+      this.emit(`tick:${data.tick.symbol}`, data.tick);
+    }
+
     this.emit('message', data);
   }
 
-  /**
-   * Send a request to Deriv API
-   */
-  async send(request, timeout = 10000) {
+  async send(request, timeout = 15000) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket is not connected'));
+    }
+
     return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket is not connected'));
-        return;
-      }
-
       const reqId = this.messageId++;
-      const messageWithId = { ...request, req_id: reqId };
+      const payload = { ...request, req_id: reqId };
 
-      // Set up timeout
       const timeoutId = setTimeout(() => {
         delete this.pendingRequests[reqId];
-        reject(new Error(`Request timeout for ${request.type}`));
+        reject(new Error(`Request timeout for ${JSON.stringify(request)}`));
       }, timeout);
 
-      // Set up callback
       this.pendingRequests[reqId] = (response) => {
         clearTimeout(timeoutId);
         if (response.error) {
-          reject(new Error(response.error.message));
+          reject(new Error(response.error.message || 'Deriv request error'));
         } else {
           resolve(response);
         }
       };
 
       try {
-        this.ws.send(JSON.stringify(messageWithId));
+        this.ws.send(JSON.stringify(payload));
       } catch (err) {
         clearTimeout(timeoutId);
         delete this.pendingRequests[reqId];
@@ -121,197 +119,121 @@ class DerivWebSocket {
     });
   }
 
-  /**
-   * Subscribe to stream updates
-   */
-  subscribe(type, params, callback) {
-    const request = {
-      [type]: 1,
-      ...params,
-      subscribe: 1,
-    };
+  async subscribeTicks(symbol, callback) {
+    if (!symbol) {
+      throw new Error('Symbol is required for tick subscription');
+    }
 
-    this.send(request)
-      .then((response) => {
-        if (response.subscription) {
-          const subscriptionId = response.subscription.id;
-          this.on(`subscribe:${subscriptionId}`, callback);
-          return subscriptionId;
-        }
-      })
-      .catch((err) => {
-        console.error(`Error subscribing to ${type}:`, err);
-      });
+    const handler = (tick) => callback(tick);
+    const unsubscribeEvent = this.on(`tick:${symbol}`, handler);
+
+    const response = await this.send({ ticks: symbol, subscribe: 1 });
+    const subscriptionId = response.subscription?.id;
+
+    if (subscriptionId) {
+      this.subscriptions[subscriptionId] = unsubscribeEvent;
+    }
+
+    return () => {
+      unsubscribeEvent();
+      if (subscriptionId) {
+        delete this.subscriptions[subscriptionId];
+        this.send({ forget: subscriptionId }).catch(() => {});
+      }
+    };
   }
 
-  /**
-   * Get website status
-   */
   async getWebsiteStatus() {
     return this.send({ website_status: 1 });
   }
 
-  /**
-   * Get active symbols/markets
-   */
   async getActiveSymbols(market = 'synthetic_index') {
-    return this.send({
-      active_symbols: 'brief',
-      product_type: market,
-    });
+    return this.send({ active_symbols: 'brief', product_type: market });
   }
 
-  /**
-   * Subscribe to live ticks for a symbol
-   */
-  subscribeTicks(symbol, callback) {
-    const request = {
-      ticks: symbol,
-      subscribe: 1,
-    };
-
-    const subscriptionId = `ticks_${symbol}_${Date.now()}`;
-    this.send(request)
-      .then(() => {
-        this.on('message', (data) => {
-          if (data.tick && data.tick.symbol === symbol) {
-            callback(data.tick);
-          }
-        });
-      })
-      .catch((err) => console.error('Error subscribing to ticks:', err));
-
-    return subscriptionId;
-  }
-
-  /**
-   * Get contract proposal
-   */
-  async getProposal(proposal) {
-    return this.send({
-      proposal: 1,
-      ...proposal,
-    });
-  }
-
-  /**
-   * Buy a contract
-   */
-  async buyContract(contractProposal) {
-    return this.send({
-      buy: contractProposal.contract_id,
-      price: contractProposal.ask_price,
-    });
-  }
-
-  /**
-   * Get user account balance
-   */
   async getBalance() {
-    return this.send({ balance: 1, subscribe: 1 });
+    return this.send({ balance: 1 });
   }
 
-  /**
-   * Get open contracts
-   */
-  async getOpenContracts() {
-    return this.send({ portfolio: 1, subscribe: 1 });
+  async getProposal(proposal) {
+    return this.send({ proposal: 1, ...proposal });
   }
 
-  /**
-   * Sell/Close a contract
-   */
-  async sellContract(contractId, price) {
-    return this.send({
-      sell: contractId,
-      price: price,
-    });
+  async buyContract(contractProposal) {
+    return this.send({ buy: contractProposal.contract_id, price: contractProposal.ask_price });
   }
 
-  /**
-   * Get historical ticks for charting
-   */
-  async getHistoricalTicks(symbol, granularity = 60, count = 100) {
+  async getHistoricalCandles(symbol, granularity = 60, count = 80) {
     return this.send({
       ticks_history: symbol,
       adjust_start_time: 1,
-      count: count,
-      granularity: granularity,
+      count,
+      granularity,
       style: 'candles',
-      subscribe: 1,
     });
   }
 
-  /**
-   * Attempt to reconnect
-   */
-  attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(
-        `🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
-      );
-      setTimeout(() => {
-        this.connect().catch((err) => {
-          console.error('Reconnection failed:', err);
-        });
-      }, this.reconnectDelay);
-    } else {
-      console.error('❌ Max reconnection attempts reached');
-      this.emit('max_reconnect_attempts_reached');
-    }
+  async getOpenContracts() {
+    return this.send({ portfolio: 1 });
   }
 
-  /**
-   * Event emitter methods
-   */
+  async sellContract(contractId, price) {
+    return this.send({ sell: contractId, price });
+  }
+
+  attemptReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.emit('error', new Error('Maximum reconnect attempts reached'));
+      return;
+    }
+
+    this.reconnectAttempts += 1;
+    const delay = this.reconnectDelay * this.reconnectAttempts;
+    setTimeout(() => {
+      this.connect().catch((err) => this.emit('error', err));
+    }, delay);
+  }
+
   on(event, callback) {
     if (!this.listeners[event]) {
       this.listeners[event] = [];
     }
     this.listeners[event].push(callback);
 
-    // Return unsubscribe function
     return () => {
       this.listeners[event] = this.listeners[event].filter((cb) => cb !== callback);
     };
   }
 
   off(event, callback) {
-    if (this.listeners[event]) {
-      this.listeners[event] = this.listeners[event].filter((cb) => cb !== callback);
-    }
+    if (!this.listeners[event]) return;
+    this.listeners[event] = this.listeners[event].filter((cb) => cb !== callback);
   }
 
   emit(event, data) {
-    if (this.listeners[event]) {
-      this.listeners[event].forEach((callback) => callback(data));
-    }
+    if (!this.listeners[event]) return;
+    this.listeners[event].forEach((callback) => callback(data));
   }
 
-  /**
-   * Disconnect
-   */
   disconnect() {
     this.isIntentionallyClosed = true;
+    Object.values(this.subscriptions).forEach((unsubscribe) => unsubscribe?.());
+    this.subscriptions = {};
     if (this.ws) {
       this.ws.close();
     }
   }
 
-  /**
-   * Check connection status
-   */
   isConnected() {
     return this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 }
 
-// Singleton instance
 let derivInstance = null;
-
-export const initDeriv = (appId) => {
-  derivInstance = new DerivWebSocket(appId);
+export const initDeriv = () => {
+  if (!derivInstance) {
+    derivInstance = new DerivWebSocket();
+  }
   return derivInstance;
 };
 

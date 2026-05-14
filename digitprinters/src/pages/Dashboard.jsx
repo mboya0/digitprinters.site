@@ -15,7 +15,7 @@ import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
 export default function Dashboard() {
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const { balance, selectedSymbol, setSelectedSymbol, SYNTHETIC_INDICES, loading } = useTrading();
+  const { balance, selectedSymbol, setSelectedSymbol, activeSymbols, loading } = useTrading();
 
   useEffect(() => {
     if (!isAuthenticated && !authLoading) {
@@ -95,12 +95,12 @@ export default function Dashboard() {
             <Card>
               <h2 className="text-xl font-semibold text-white mb-6">Market Overview</h2>
               <div className="space-y-4">
-                {SYNTHETIC_INDICES.map((index) => (
+                {activeSymbols.map((index) => (
                   <div
-                    key={index.code}
-                    onClick={() => setSelectedSymbol(index.code)}
+                    key={index.symbol}
+                    onClick={() => setSelectedSymbol(index.symbol)}
                     className={`p-4 rounded-lg cursor-pointer transition ${
-                      selectedSymbol === index.code
+                      selectedSymbol === index.symbol
                         ? 'bg-blue-600 bg-opacity-20 border border-blue-500'
                         : 'bg-slate-700 hover:bg-slate-600 border border-slate-700'
                     }`}
@@ -108,7 +108,7 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-semibold text-white">{index.name}</p>
-                        <p className="text-sm text-gray-400">{index.code}</p>
+                        <p className="text-sm text-gray-400">{index.symbol}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-lg font-bold text-white">$1,234.56</p>

@@ -1,33 +1,56 @@
-/**
- * Trading Page
- * Main trading interface with charts and trading controls
- */
-
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTrading } from '../context/TradingContext';
+import { useMarketData } from '../hooks/useMarketData';
+import { useTicks } from '../hooks/useTicks';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import { ChevronDown, TrendingUp, TrendingDown } from 'lucide-react';
+import MarketSidebar from '../components/trading/MarketSidebar';
+import TradingChart from '../components/trading/TradingChart';
+import LiveTicker from '../components/trading/LiveTicker';
+import SymbolSelector from '../components/trading/SymbolSelector';
+import { TrendingUp, TrendingDown } from 'lucide-react';
+
+const parseDuration = (value) => {
+  if (value.endsWith('s')) return { duration: Number(value.replace('s', '')), durationUnit: 's' };
+  if (value.endsWith('m')) return { duration: Number(value.replace('m', '')), durationUnit: 'm' };
+  if (value.endsWith('h')) return { duration: Number(value.replace('h', '')), durationUnit: 'h' };
+  return { duration: 1, durationUnit: 'm' };
+};
 
 export default function Trading() {
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const { 
-    balance, 
-    selectedSymbol, 
-    setSelectedSymbol, 
-    SYNTHETIC_INDICES, 
-    loading 
+  const {
+    activeSymbols,
+    selectedSymbol,
+    selectedTimeframe,
+    setSelectedSymbol,
+    setSelectedTimeframe,
+    balance,
+    loading,
+    error,
+    requestProposal,
+    buyContract,
+    websiteStatus,
   } = useTrading();
 
-  const [amount, setAmount] = useState('10');
-  const [duration, setDuration] = useState('1m');
+  const [amount, setAmount] = useState('25');
+  const [tradeDuration, setTradeDuration] = useState('1m');
   const [contractType, setContractType] = useState('CALL');
-  const [showChart, setShowChart] = useState(true);
-  const chartContainerRef = useRef(null);
+  const [proposalData, setProposalData] = useState(null);
+  const [tradeError, setTradeError] = useState(null);
+  const [proposalLoading, setProposalLoading] = useState(false);
+
+  const { candles, loading: chartLoading } = useMarketData(selectedSymbol, selectedTimeframe);
+  const { tick, price, direction } = useTicks(selectedSymbol);
+
+  const selectedMarket = useMemo(
+    () => activeSymbols.find((item) => item.symbol === selectedSymbol) || null,
+    [activeSymbols, selectedSymbol]
+  );
 
   useEffect(() => {
     if (!isAuthenticated && !authLoading) {
@@ -35,12 +58,41 @@ export default function Trading() {
     }
   }, [isAuthenticated, authLoading, navigate]);
 
-  const handleBuyCall = () => {
-    console.log('Buy CALL:', { symbol: selectedSymbol, amount, duration, type: 'CALL' });
+  const handleProposal = async () => {
+    if (!selectedSymbol) return;
+    setTradeError(null);
+    setProposalLoading(true);
+
+    try {
+      const { duration, durationUnit } = parseDuration(tradeDuration);
+      const proposal = await requestProposal({
+        symbol: selectedSymbol,
+        amount: Number(amount),
+        duration,
+        durationUnit,
+        contractType,
+      });
+      setProposalData(proposal.proposal || proposal);
+    } catch (err) {
+      setTradeError(err.message || 'Proposal request failed');
+    } finally {
+      setProposalLoading(false);
+    }
   };
 
-  const handleBuySell = () => {
-    console.log('Buy PUT:', { symbol: selectedSymbol, amount, duration, type: 'PUT' });
+  const handleBuy = async () => {
+    if (!proposalData?.contract_id) {
+      setTradeError('Request a proposal before buying.');
+      return;
+    }
+
+    try {
+      setTradeError(null);
+      await buyContract(proposalData);
+      setProposalData(null);
+    } catch (err) {
+      setTradeError(err.message || 'Buy request failed');
+    }
   };
 
   if (authLoading || loading) {
@@ -48,125 +100,108 @@ export default function Trading() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 pb-12">
+    <div className="min-h-screen bg-slate-950 pb-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">DTrader</h1>
-          <p className="text-gray-400">Trade synthetic indices with advanced tools</p>
+        <div className="mb-8 space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.35em] text-cyan-300/80">Deriv Companion</p>
+              <h1 className="text-4xl font-bold text-white">Synthetic Indices Trading</h1>
+              <p className="mt-2 text-slate-400 max-w-2xl">
+                Live quotes, dynamic symbol discovery, and streaming market data backed by Deriv.
+                Deposits and withdrawals remain directly on Deriv.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-3xl border border-slate-800 bg-slate-900 px-5 py-4 text-white shadow-lg shadow-slate-950/40">
+                <p className="text-sm text-slate-400">Connection</p>
+                <p className="mt-1 font-semibold text-cyan-300">{websiteStatus?.status || 'Connected'}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-800 bg-slate-900 px-5 py-4 text-white shadow-lg shadow-slate-950/40">
+                <p className="text-sm text-slate-400">Balance</p>
+                <p className="mt-1 text-2xl font-semibold">${balance.toFixed(2)}</p>
+              </div>
+              <div className="rounded-3xl border border-slate-800 bg-slate-900 px-5 py-4 text-white shadow-lg shadow-slate-950/40">
+                <p className="text-sm text-slate-400">Active symbols</p>
+                <p className="mt-1 text-2xl font-semibold">{activeSymbols.length}</p>
+              </div>
+            </div>
+          </div>
+          <LiveTicker symbols={activeSymbols} tickData={tick ? { [selectedSymbol]: tick } : {}} />
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Chart Section */}
-          <div className="lg:col-span-2">
+        <div className="grid gap-6 xl:grid-cols-[320px_1fr_360px]">
+          <MarketSidebar
+            symbols={activeSymbols}
+            selectedSymbol={selectedSymbol}
+            onSelect={setSelectedSymbol}
+            loading={!activeSymbols.length}
+          />
+
+          <div className="space-y-6">
             <Card>
-              {/* Chart Header */}
-              <div className="flex items-center justify-between mb-4">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
                 <div>
-                  <div className="flex items-center gap-3">
-                    <select
-                      value={selectedSymbol}
-                      onChange={(e) => setSelectedSymbol(e.target.value)}
-                      className="bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                    >
-                      {SYNTHETIC_INDICES.map((idx) => (
-                        <option key={idx.code} value={idx.code}>
-                          {idx.name} ({idx.code})
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-2xl font-bold text-white">$1,234.56</div>
-                    <div className="text-green-400 font-semibold">+2.45%</div>
-                  </div>
+                  <p className="text-sm uppercase tracking-[0.35em] text-cyan-300/80">Market</p>
+                  <h2 className="text-3xl font-semibold text-white">
+                    {selectedMarket?.name || selectedSymbol || 'Loading market'}
+                  </h2>
+                  <p className="mt-2 text-slate-400">{selectedMarket?.market}</p>
                 </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm">
-                    1m
-                  </button>
-                  <button className="px-3 py-2 bg-blue-600 rounded text-white text-sm">
-                    5m
-                  </button>
-                  <button className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm">
-                    15m
-                  </button>
-                  <button className="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-white text-sm">
-                    1h
-                  </button>
-                </div>
-              </div>
-
-              {/* Chart Placeholder */}
-              <div
-                ref={chartContainerRef}
-                className="w-full h-96 bg-slate-800 rounded border border-slate-700 flex items-center justify-center mb-4"
-              >
-                <div className="text-center">
-                  <div className="text-gray-400 mb-4">TradingView Lightweight Charts</div>
-                  <div className="flex items-end justify-center gap-1 h-32">
-                    {[40, 45, 50, 48, 55, 60, 58, 65, 62, 70, 68, 75, 72, 80].map((h, i) => (
-                      <div
-                        key={i}
-                        className="w-2 bg-gradient-to-t from-green-500 to-green-400 rounded-t"
-                        style={{ height: `${h}%` }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Technical Indicators */}
-              <div className="grid grid-cols-4 gap-4 text-center">
-                <div className="bg-slate-700 rounded p-3">
-                  <p className="text-gray-400 text-xs">RSI(14)</p>
-                  <p className="text-white font-semibold">65.4</p>
-                </div>
-                <div className="bg-slate-700 rounded p-3">
-                  <p className="text-gray-400 text-xs">MACD</p>
-                  <p className="text-green-400 font-semibold">Bullish</p>
-                </div>
-                <div className="bg-slate-700 rounded p-3">
-                  <p className="text-gray-400 text-xs">MA(20)</p>
-                  <p className="text-white font-semibold">$1,230</p>
-                </div>
-                <div className="bg-slate-700 rounded p-3">
-                  <p className="text-gray-400 text-xs">Support</p>
-                  <p className="text-white font-semibold">$1,200</p>
+                <div className="rounded-3xl border border-slate-800 bg-slate-900 px-4 py-3 text-right">
+                  <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Last tick</p>
+                  <p className="mt-2 text-3xl font-semibold text-white">
+                    {price ? price.toFixed(2) : '--'}
+                  </p>
+                  <p className={`mt-1 text-sm ${direction === 'up' ? 'text-emerald-400' : direction === 'down' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {direction === 'up' ? 'Rising' : direction === 'down' ? 'Falling' : 'Stale'}
+                  </p>
                 </div>
               </div>
             </Card>
+
+            <TradingChart
+              symbol={selectedSymbol}
+              candles={candles}
+              loading={chartLoading}
+              timeframe={selectedTimeframe}
+              onChangeTimeframe={setSelectedTimeframe}
+            />
+
+            <SymbolSelector
+              symbols={activeSymbols}
+              selectedSymbol={selectedSymbol}
+              onChange={setSelectedSymbol}
+            />
           </div>
 
-          {/* Trading Panel */}
-          <div>
-            <Card className="sticky top-24">
-              <h2 className="text-2xl font-bold text-white mb-6">Place Trade</h2>
+          <Card className="space-y-6">
+            <div>
+              <p className="text-sm uppercase tracking-[0.35em] text-cyan-300/80">Trade panel</p>
+              <h2 className="text-2xl font-semibold text-white">Live trade execution</h2>
+            </div>
 
-              {/* Balance Display */}
-              <div className="bg-slate-700 rounded p-3 mb-6">
-                <p className="text-gray-400 text-sm mb-1">Balance</p>
-                <p className="text-2xl font-bold text-white">${balance ? balance.toFixed(2) : '0.00'}</p>
-              </div>
+            {error && <p className="rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</p>}
+            {tradeError && <p className="rounded-2xl bg-red-500/10 px-4 py-3 text-sm text-red-300">{tradeError}</p>}
 
-              {/* Amount Input */}
-              <div className="mb-4">
-                <label className="block text-sm text-gray-400 mb-2">Amount ($)</label>
+            <div className="space-y-4 rounded-3xl border border-slate-800 bg-slate-900 p-5">
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Stake</label>
                 <input
                   type="number"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
                   min="1"
-                  max={balance}
-                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                  onChange={(event) => setAmount(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
                 />
               </div>
 
-              {/* Duration Select */}
-              <div className="mb-4">
-                <label className="block text-sm text-gray-400 mb-2">Duration</label>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Duration</label>
                 <select
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                  value={tradeDuration}
+                  onChange={(event) => setTradeDuration(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
                 >
                   <option value="15s">15 seconds</option>
                   <option value="30s">30 seconds</option>
@@ -177,68 +212,74 @@ export default function Trading() {
                 </select>
               </div>
 
-              {/* Contract Type */}
-              <div className="mb-6">
-                <label className="block text-sm text-gray-400 mb-2">Contract Type</label>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Direction</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
+                    type="button"
                     onClick={() => setContractType('CALL')}
-                    className={`p-3 rounded font-semibold transition ${
+                    className={`rounded-2xl px-4 py-3 font-semibold transition ${
                       contractType === 'CALL'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    <TrendingUp size={18} className="mx-auto mb-1" />
-                    UP
+                    <TrendingUp className="inline mr-2" size={16} /> UP
                   </button>
                   <button
+                    type="button"
                     onClick={() => setContractType('PUT')}
-                    className={`p-3 rounded font-semibold transition ${
+                    className={`rounded-2xl px-4 py-3 font-semibold transition ${
                       contractType === 'PUT'
-                        ? 'bg-red-600 text-white'
-                        : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                        ? 'bg-red-500 text-slate-950'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    <TrendingDown size={18} className="mx-auto mb-1" />
-                    DOWN
+                    <TrendingDown className="inline mr-2" size={16} /> DOWN
                   </button>
                 </div>
               </div>
 
-              {/* Trade Buttons */}
-              <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
                 <Button
-                  onClick={handleBuyCall}
-                  className="w-full bg-green-600 hover:bg-green-700 py-3 text-lg font-semibold"
+                  variant="success"
+                  onClick={handleProposal}
+                  disabled={!selectedSymbol || proposalLoading}
+                  className="w-full"
                 >
-                  BUY UP
+                  Request Quote
                 </Button>
                 <Button
-                  onClick={handleBuySell}
-                  className="w-full bg-red-600 hover:bg-red-700 py-3 text-lg font-semibold"
+                  variant="danger"
+                  onClick={handleBuy}
+                  disabled={!proposalData}
+                  className="w-full"
                 >
-                  BUY DOWN
+                  Execute Buy
                 </Button>
               </div>
 
-              {/* Trade Info */}
-              <div className="mt-6 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Potential Profit:</span>
-                  <span className="text-green-400 font-semibold">
-                    +${(parseFloat(amount) * 0.8).toFixed(2)}
-                  </span>
+              {proposalData && (
+                <div className="rounded-3xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">
+                  <p className="font-semibold text-white">Proposal details</p>
+                  <div className="mt-3 grid gap-2">
+                    <div className="flex justify-between">
+                      <span>Contract</span>
+                      <span>{proposalData.contract_type || contractType}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Stake</span>
+                      <span>${proposalData.ask_price?.toFixed(2) ?? amount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Expected payout</span>
+                      <span>${proposalData.payout?.toFixed(2) ?? '--'}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Payout:</span>
-                  <span className="text-white font-semibold">
-                    ${(parseFloat(amount) * 1.8).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            </Card>
-          </div>
+              )}
+            </div>
+          </Card>
         </div>
       </div>
     </div>

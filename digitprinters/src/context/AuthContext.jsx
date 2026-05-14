@@ -1,75 +1,72 @@
 /**
  * Auth Context
- * Manages authentication state and Deriv connection
+ * Manages Deriv websocket lifecycle and platform state
  */
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { initDeriv, getDeriv } from '../services/deriv';
+import { initDeriv } from '../services/deriv';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState({ email: 'trader@digitprinters.io' });
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deriv, setDeriv] = useState(null);
+  const [status, setStatus] = useState('disconnected');
   const [error, setError] = useState(null);
+  const [websiteStatus, setWebsiteStatus] = useState(null);
 
-  // Initialize Deriv connection on mount
   useEffect(() => {
-    const initDerivConnection = async () => {
+    const derivInstance = initDeriv();
+    setDeriv(derivInstance);
+
+    const updateStatus = (nextStatus) => setStatus(nextStatus);
+    const handleError = (err) => setError(err?.message || String(err));
+
+    const unsubStatus = derivInstance.on('status', updateStatus);
+    const unsubError = derivInstance.on('error', handleError);
+    const unsubConnected = derivInstance.on('connected', () => {
+      setIsAuthenticated(true);
+      setError(null);
+    });
+
+    const connect = async () => {
       try {
-        const appId = import.meta.env.VITE_DERIV_APP_ID || '1234'; // Replace with your app ID
-        const derivInstance = initDeriv(appId);
-        setDeriv(derivInstance);
-
-        // Attempt connection
         await derivInstance.connect();
-        console.log('✅ Deriv connection established');
-
-        // Get initial website status
-        const status = await derivInstance.getWebsiteStatus();
-        console.log('Website status:', status);
+        const statusResponse = await derivInstance.getWebsiteStatus();
+        setWebsiteStatus(statusResponse.website_status || null);
       } catch (err) {
-        console.error('Failed to initialize Deriv:', err);
-        setError(err.message);
+        handleError(err);
       } finally {
         setLoading(false);
       }
     };
 
-    initDerivConnection();
+    connect();
 
     return () => {
-      if (deriv) {
-        deriv.disconnect();
-      }
+      unsubStatus();
+      unsubError();
+      unsubConnected();
+      derivInstance.disconnect();
     };
   }, []);
 
-  const connectDeriv = async (authCode) => {
+  const connectDeriv = async () => {
+    if (!deriv) return;
+    setLoading(true);
     try {
-      setLoading(true);
-      // This is where you would handle OAuth flow with Deriv
-      // For now, we'll just set authenticated state
-      const userData = {
-        email: 'user@example.com',
-        id: 'user_123',
-        account: authCode,
-      };
-      setUser(userData);
+      await deriv.connect();
       setIsAuthenticated(true);
-      return userData;
     } catch (err) {
-      setError(err.message);
-      throw err;
+      setError(err.message || 'Deriv connection failed');
     } finally {
       setLoading(false);
     }
   };
 
   const logout = () => {
-    setUser(null);
     setIsAuthenticated(false);
     if (deriv) {
       deriv.disconnect();
@@ -83,7 +80,9 @@ export const AuthProvider = ({ children }) => {
         isAuthenticated,
         loading,
         deriv,
+        status,
         error,
+        websiteStatus,
         connectDeriv,
         logout,
       }}
