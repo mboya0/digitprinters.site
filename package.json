@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "firebase": "^12.13.0",
+    "lightweight-charts": "^5.2.0",
+    "lucide-react": "^1.14.0",
+    "react-router-dom": "^7.15.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.14",
+    "tailwindcss": "^4.3.0"
+  }
+}
