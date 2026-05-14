@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTrading } from '../context/TradingContext';
 import { useMarketData } from '../hooks/useMarketData';
 import { useTicks } from '../hooks/useTicks';
+import { useToast } from '../context/ToastContext';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -44,8 +45,15 @@ export default function Trading() {
   const [tradeError, setTradeError] = useState(null);
   const [proposalLoading, setProposalLoading] = useState(false);
 
+  const { addToast } = useToast();
+  const marketSymbols = useMemo(
+    () => activeSymbols.slice(0, 8).map((item) => item.symbol),
+    [activeSymbols]
+  );
+
   const { candles, loading: chartLoading } = useMarketData(selectedSymbol, selectedTimeframe);
   const { tick, price, direction } = useTicks(selectedSymbol);
+  const { ticks: marketTicks = {}, directions: marketDirections = {} } = useTicks(marketSymbols);
 
   const selectedMarket = useMemo(
     () => activeSymbols.find((item) => item.symbol === selectedSymbol) || null,
@@ -73,8 +81,10 @@ export default function Trading() {
         contractType,
       });
       setProposalData(proposal.proposal || proposal);
+      addToast('Quote received successfully.', 'success');
     } catch (err) {
       setTradeError(err.message || 'Proposal request failed');
+      addToast(err.message || 'Proposal request failed', 'error');
     } finally {
       setProposalLoading(false);
     }
@@ -90,10 +100,25 @@ export default function Trading() {
       setTradeError(null);
       await buyContract(proposalData);
       setProposalData(null);
+      addToast('Contract purchase executed successfully', 'success');
     } catch (err) {
-      setTradeError(err.message || 'Buy request failed');
+      const errorMessage = err.message || 'Buy request failed';
+      setTradeError(errorMessage);
+      addToast(errorMessage, 'error');
     }
   };
+
+  useEffect(() => {
+    if (error) {
+      addToast(error, 'error');
+    }
+  }, [error, addToast]);
+
+  useEffect(() => {
+    if (tradeError) {
+      addToast(tradeError, 'error');
+    }
+  }, [tradeError, addToast]);
 
   if (authLoading || loading) {
     return <LoadingSpinner fullScreen />;
@@ -127,7 +152,11 @@ export default function Trading() {
               </div>
             </div>
           </div>
-          <LiveTicker symbols={activeSymbols} tickData={tick ? { [selectedSymbol]: tick } : {}} />
+          <LiveTicker
+            symbols={activeSymbols}
+            tickData={marketTicks}
+            directionData={marketDirections}
+          />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[320px_1fr_360px]">

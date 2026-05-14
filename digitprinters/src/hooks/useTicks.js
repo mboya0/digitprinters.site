@@ -1,56 +1,94 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 const getQuote = (tick) => tick?.quote ?? tick?.bid ?? tick?.ask ?? null;
 
-export function useTicks(symbol) {
+export function useTicks(symbolOrSymbols) {
   const { deriv } = useAuth();
-  const [tick, setTick] = useState(null);
-  const [direction, setDirection] = useState('flat');
+  const [singleTick, setSingleTick] = useState(null);
+  const [singleDirection, setSingleDirection] = useState('flat');
+  const [marketTicks, setMarketTicks] = useState({});
+  const [marketDirections, setMarketDirections] = useState({});
   const [error, setError] = useState(null);
 
+  const symbols = useMemo(() => {
+    if (!symbolOrSymbols) return [];
+    return Array.isArray(symbolOrSymbols) ? symbolOrSymbols : [symbolOrSymbols];
+  }, [symbolOrSymbols]);
+
   useEffect(() => {
-    if (!symbol || !deriv || !deriv.isConnected()) {
-      setTick(null);
-      setDirection('flat');
+    if (!symbols.length || !deriv || !deriv.isConnected()) {
+      setSingleTick(null);
+      setSingleDirection('flat');
+      setMarketTicks({});
+      setMarketDirections({});
       return;
     }
 
-    let lastPrice = null;
-    let unsubscribe;
+    const unsubscribeFunctions = [];
+    const lastPrices = {};
 
-    const subscribe = async () => {
-      try {
-        unsubscribe = await deriv.subscribeTicks(symbol, (nextTick) => {
-          const price = getQuote(nextTick);
-          setTick(nextTick);
-          setDirection((currentDirection) => {
-            if (lastPrice === null || price === null) return 'flat';
-            if (price > lastPrice) return 'up';
-            if (price < lastPrice) return 'down';
-            return currentDirection;
+    symbols.forEach((symbol) => {
+      let unsubscribe;
+
+      const subscribe = async () => {
+        try {
+          unsubscribe = await deriv.subscribeTicks(symbol, (nextTick) => {
+            const price = getQuote(nextTick);
+
+            if (Array.isArray(symbolOrSymbols)) {
+              setMarketTicks((prev) => ({ ...prev, [symbol]: nextTick }));
+              setMarketDirections((prev) => {
+                const previousPrice = lastPrices[symbol];
+                let nextDirection = previousPrice === null || previousPrice === undefined ? 'flat' : prev[symbol] || 'flat';
+                if (price !== null && previousPrice !== null && previousPrice !== undefined) {
+                  if (price > previousPrice) nextDirection = 'up';
+                  if (price < previousPrice) nextDirection = 'down';
+                }
+                lastPrices[symbol] = price;
+                return { ...prev, [symbol]: nextDirection };
+              });
+            } else {
+              setSingleTick(nextTick);
+              setSingleDirection((currentDirection) => {
+                if (lastPrices[symbol] === null || lastPrices[symbol] === undefined || price === null) return 'flat';
+                if (price > lastPrices[symbol]) return 'up';
+                if (price < lastPrices[symbol]) return 'down';
+                return currentDirection;
+              });
+            }
+
+            lastPrices[symbol] = price;
           });
-          lastPrice = price;
-        });
-      } catch (err) {
-        setError(err.message || 'Tick subscription failed');
-      }
-    };
 
-    subscribe();
+          unsubscribeFunctions.push(unsubscribe);
+        } catch (err) {
+          setError(err.message || 'Tick subscription failed');
+        }
+      };
+
+      subscribe();
+    });
 
     return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
+      unsubscribeFunctions.forEach((fn) => fn && fn());
     };
-  }, [symbol, deriv]);
+  }, [deriv, symbols, symbolOrSymbols]);
 
-  return {
-    tick,
-    price: getQuote(tick),
-    direction,
-    error,
-    isLive: Boolean(tick),
-  };
+  const price = getQuote(singleTick);
+
+  return Array.isArray(symbolOrSymbols)
+    ? {
+        ticks: marketTicks,
+        directions: marketDirections,
+        error,
+        isLive: Object.keys(marketTicks).length > 0,
+      }
+    : {
+        tick: singleTick,
+        price,
+        direction: singleDirection,
+        error,
+        isLive: Boolean(singleTick),
+      };
 }

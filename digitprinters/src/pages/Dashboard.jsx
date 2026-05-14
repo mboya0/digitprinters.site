@@ -14,7 +14,7 @@ import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { isAuthenticated, loading: authLoading, user, logout } = useAuth();
   const { balance, selectedSymbol, setSelectedSymbol, activeSymbols, loading } = useTrading();
 
   useEffect(() => {
@@ -31,9 +31,22 @@ export default function Dashboard() {
     <div className="min-h-screen bg-slate-900 pb-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
-          <p className="text-gray-400">Welcome back! Here's your trading overview.</p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
+            <p className="text-gray-400">Welcome back! Here's your trading overview.</p>
+          </div>
+          <div className="flex items-center gap-4">
+            {user && (
+              <div className="text-right">
+                <p className="text-white font-semibold">Account: {user.accountId}</p>
+                <p className="text-gray-400 text-sm">Logged in</p>
+              </div>
+            )}
+            <Button onClick={logout} variant="secondary">
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Top Stats */}
@@ -127,10 +140,17 @@ export default function Dashboard() {
               <h2 className="text-xl font-semibold text-white mb-6">Quick Actions</h2>
               <div className="space-y-3">
                 <Button
-                  onClick={() => navigate('/trading')}
+                  onClick={() => window.open('https://partner-tracking.deriv.com/click?a=14252&o=1&c=3&link_id=1', '_blank')}
                   className="w-full bg-green-600 hover:bg-green-700"
                 >
                   Start Trading
+                </Button>
+                <Button
+                  onClick={() => navigate('/trading')}
+                  variant="secondary"
+                  className="w-full"
+                >
+                  In-App Trading
                 </Button>
                 <Button
                   onClick={() => navigate('/bots')}

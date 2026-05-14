@@ -1,4 +1,5 @@
 const DERIV_APP_ID = '332LK4VWd9A4pEEfTMn53';
+const DERIV_API_TOKEN = '3JNlgipzptboEHB';
 const DERIV_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${DERIV_APP_ID}`;
 
 class DerivWebSocket {
@@ -8,16 +9,22 @@ class DerivWebSocket {
     this.messageId = 1;
     this.listeners = {};
     this.pendingRequests = {};
-    this.subscriptions = {};
+    this.activeSubscriptions = {};
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 7;
     this.reconnectDelay = 2000;
     this.isIntentionallyClosed = false;
     this.status = 'disconnected';
+    this.authorized = false;
+    this.token = null;
   }
 
-  connect() {
-    if (this.isConnected()) {
+  setToken(token) {
+    this.token = token;
+  }
+
+  async connect() {
+    if (this.isConnected() && this.authorized) {
       return Promise.resolve();
     }
 
@@ -28,13 +35,23 @@ class DerivWebSocket {
 
         this.ws = new WebSocket(this.url);
 
-        this.ws.onopen = () => {
-          this.status = 'connected';
+        this.ws.onopen = async () => {
           this.reconnectAttempts = 0;
           this.isIntentionallyClosed = false;
           this.emit('connected');
-          this.emit('status', this.status);
-          resolve();
+          this.emit('status', 'authorizing');
+
+          try {
+            await this.authorize();
+            this.status = 'connected';
+            this.emit('status', this.status);
+            await this.restoreSubscriptions();
+            resolve();
+          } catch (err) {
+            this.status = 'error';
+            this.emit('status', this.status);
+            reject(err);
+          }
         };
 
         this.ws.onmessage = (event) => {
@@ -53,6 +70,7 @@ class DerivWebSocket {
 
         this.ws.onclose = () => {
           this.status = 'disconnected';
+          this.authorized = false;
           this.emit('disconnected');
           this.emit('status', this.status);
           if (!this.isIntentionallyClosed) {
@@ -83,6 +101,10 @@ class DerivWebSocket {
       this.emit(`tick:${data.tick.symbol}`, data.tick);
     }
 
+    if (data.authorize) {
+      this.emit('authorized', data);
+    }
+
     this.emit('message', data);
   }
 
@@ -95,13 +117,13 @@ class DerivWebSocket {
       const reqId = this.messageId++;
       const payload = { ...request, req_id: reqId };
 
-      const timeoutId = setTimeout(() => {
+      const timeoutId = window.setTimeout(() => {
         delete this.pendingRequests[reqId];
         reject(new Error(`Request timeout for ${JSON.stringify(request)}`));
       }, timeout);
 
       this.pendingRequests[reqId] = (response) => {
-        clearTimeout(timeoutId);
+        window.clearTimeout(timeoutId);
         if (response.error) {
           reject(new Error(response.error.message || 'Deriv request error'));
         } else {
@@ -112,11 +134,52 @@ class DerivWebSocket {
       try {
         this.ws.send(JSON.stringify(payload));
       } catch (err) {
-        clearTimeout(timeoutId);
+        window.clearTimeout(timeoutId);
         delete this.pendingRequests[reqId];
         reject(err);
       }
     });
+  }
+
+  async authorize(token) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket must be open to authorize');
+    }
+
+    const authToken = token || this.token;
+    if (!authToken) {
+      throw new Error('No token provided for authorization');
+    }
+
+    const response = await this.send({ authorize: authToken });
+    if (response.error) {
+      throw new Error(response.error.message || 'Authorization failed');
+    }
+
+    this.authorized = true;
+    this.emit('authorized', response);
+    return response;
+  }
+
+  async restoreSubscriptions() {
+    const keys = Object.keys(this.activeSubscriptions);
+    if (!keys.length) return;
+
+    for (const symbol of keys) {
+      const record = this.activeSubscriptions[symbol];
+      if (!record || !record.callback) continue;
+
+      try {
+        const response = await this.send({ ticks: symbol, subscribe: 1 });
+        const subscriptionId = response.subscription?.id;
+        if (subscriptionId) {
+          record.subscriptionId = subscriptionId;
+          this.activeSubscriptions[symbol] = record;
+        }
+      } catch (err) {
+        this.emit('error', err);
+      }
+    }
   }
 
   async subscribeTicks(symbol, callback) {
@@ -126,20 +189,23 @@ class DerivWebSocket {
 
     const handler = (tick) => callback(tick);
     const unsubscribeEvent = this.on(`tick:${symbol}`, handler);
-
     const response = await this.send({ ticks: symbol, subscribe: 1 });
     const subscriptionId = response.subscription?.id;
 
-    if (subscriptionId) {
-      this.subscriptions[subscriptionId] = unsubscribeEvent;
-    }
+    this.activeSubscriptions[symbol] = {
+      callback,
+      handler,
+      subscriptionId,
+      unsubscribeEvent,
+    };
 
     return () => {
       unsubscribeEvent();
-      if (subscriptionId) {
-        delete this.subscriptions[subscriptionId];
-        this.send({ forget: subscriptionId }).catch(() => {});
+      const record = this.activeSubscriptions[symbol];
+      if (record?.subscriptionId) {
+        this.send({ forget: record.subscriptionId }).catch(() => {});
       }
+      delete this.activeSubscriptions[symbol];
     };
   }
 
@@ -217,8 +283,8 @@ class DerivWebSocket {
 
   disconnect() {
     this.isIntentionallyClosed = true;
-    Object.values(this.subscriptions).forEach((unsubscribe) => unsubscribe?.());
-    this.subscriptions = {};
+    Object.values(this.activeSubscriptions).forEach((record) => record?.unsubscribeEvent?.());
+    this.activeSubscriptions = {};
     if (this.ws) {
       this.ws.close();
     }
