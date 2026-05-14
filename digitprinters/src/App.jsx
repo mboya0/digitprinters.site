@@ -9,6 +9,7 @@ import Trading from './pages/Trading';
 import Bots from './pages/Bots';
 import CopyTrading from './pages/CopyTrading';
 import AIAnalysis from './pages/AIAnalysis';
+import Settings from './pages/Settings';
 import Callback from './pages/Callback';
 
 function App() {
@@ -26,6 +27,7 @@ function App() {
               <Route path="/bots" element={<Bots />} />
               <Route path="/copy-trading" element={<CopyTrading />} />
               <Route path="/ai-analysis" element={<AIAnalysis />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>

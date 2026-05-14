@@ -9,11 +9,13 @@ import { Link } from 'react-router-dom';
 import Logo from './Logo';
 
 const navigation = [
-  { label: 'Home', href: '/' },
-  { label: 'Markets', href: '/#markets' },
-  { label: 'Bots', href: '/bots' },
-  { label: 'Copy Trading', href: '/copy-trading' },
-  { label: 'AI Analysis', href: '/ai-analysis' },
+  { label: 'Dashboard', href: '/dashboard', internal: true },
+  { label: 'Markets', href: '/trading', internal: true },
+  { label: 'DTrader', href: 'https://app.deriv.com/desktop', internal: false },
+  { label: 'Bots', href: '/bots', internal: true },
+  { label: 'Copy Trading', href: '/copy-trading', internal: true },
+  { label: 'AI Analysis', href: '/ai-analysis', internal: true },
+  { label: 'Settings', href: '/settings', internal: true },
 ];
 
 export default function Navbar() {
@@ -27,16 +29,28 @@ export default function Navbar() {
           <Logo compact />
         </Link>
 
-        <div className="hidden items-center gap-8 md:flex">
-          {navigation.map((item) => (
-            <a
-              key={item.label}
-              href={item.href}
-              className="text-sm font-medium text-slate-300 transition hover:text-white"
-            >
-              {item.label}
-            </a>
-          ))}
+        <div className="hidden items-center gap-6 md:flex">
+          {navigation.map((item) =>
+            item.internal ? (
+              <Link
+                key={item.label}
+                to={item.href}
+                className="text-sm font-medium text-slate-300 transition hover:text-white"
+              >
+                {item.label}
+              </Link>
+            ) : (
+              <a
+                key={item.label}
+                href={item.href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm font-medium text-slate-300 transition hover:text-white"
+              >
+                {item.label}
+              </a>
+            )
+          )}
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
@@ -71,16 +85,29 @@ export default function Navbar() {
       {isOpen && (
         <div className="border-t border-slate-800 bg-slate-950 px-4 py-4 md:hidden">
           <div className="flex flex-col gap-3">
-            {navigation.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                className="rounded-2xl px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-900"
-                onClick={() => setIsOpen(false)}
-              >
-                {item.label}
-              </a>
-            ))}
+            {navigation.map((item) =>
+              item.internal ? (
+                <Link
+                  key={item.label}
+                  to={item.href}
+                  className="rounded-2xl px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-900"
+                  onClick={() => setIsOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ) : (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-2xl px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-slate-900"
+                  onClick={() => setIsOpen(false)}
+                >
+                  {item.label}
+                </a>
+              )
+            )}
             {isAuthenticated ? (
               <button
                 onClick={() => {

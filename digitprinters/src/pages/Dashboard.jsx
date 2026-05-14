@@ -1,21 +1,65 @@
-/**
- * Dashboard Page
- * Main dashboard showing balance, market overview, and recent activity
- */
-
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTrading } from '../context/TradingContext';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
+import Logo from '../components/common/Logo';
+import MarketSidebar from '../components/dashboard/MarketSidebar';
+import TradeChart from '../components/dashboard/TradeChart';
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  CircleDot,
+  Sparkles,
+  ArrowRight,
+  Activity,
+} from 'lucide-react';
+
+const formatCurrency = (value, currency = 'USD') => {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(Number(value) || 0);
+  } catch {
+    return `${currency} ${Number(value || 0).toFixed(2)}`;
+  }
+};
+
+const accountTypeLabel = (account) => {
+  if (!account) return 'Unknown';
+  if (account.is_virtual || account.is_virtual === '1' || account.account_type === 'virtual') {
+    return 'Demo Account';
+  }
+  return 'Real Account';
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { isAuthenticated, loading: authLoading, user, logout } = useAuth();
-  const { balance, selectedSymbol, setSelectedSymbol, activeSymbols, loading } = useTrading();
+  const {
+    isAuthenticated,
+    loading: authLoading,
+    user,
+    accounts,
+    selectedAccount,
+    setSelectedAccount,
+    status,
+    websiteStatus,
+    logout,
+  } = useAuth();
+  const {
+    selectedSymbol,
+    setSelectedSymbol,
+    activeSymbols,
+    selectedTimeframe,
+    setSelectedTimeframe,
+    loading: tradingLoading,
+    openPositions,
+    recentTrades,
+  } = useTrading();
 
   useEffect(() => {
     if (!isAuthenticated && !authLoading) {
@@ -23,210 +67,301 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, authLoading, navigate]);
 
-  if (authLoading || loading) {
+  const activeAccount = selectedAccount || accounts[0] || null;
+  const totalBalance = useMemo(
+    () => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0),
+    [accounts]
+  );
+  const profitLoss = useMemo(
+    () => openPositions.reduce((sum, position) => sum + Number(position.profit || 0), 0),
+    [openPositions]
+  );
+  const accountCount = accounts.length;
+  const connectionColor = status === 'connected' ? 'bg-emerald-500 text-emerald-100' : status === 'connecting' ? 'bg-amber-500 text-slate-950' : 'bg-rose-500 text-white';
+
+  if (authLoading || tradingLoading) {
+    return <LoadingSpinner fullScreen />;
+  }
+
+  if (!isAuthenticated) {
     return <LoadingSpinner fullScreen />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 pb-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
-            <p className="text-gray-400">Welcome back! Here's your trading overview.</p>
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="relative overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-slate-900 via-slate-950 to-transparent opacity-80" />
+        <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
+          <div className="relative z-10 rounded-[32px] border border-slate-800 bg-slate-950/90 p-6 shadow-glow backdrop-blur-glass">
+            <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-4">
+                  <Logo />
+                  <div className="rounded-3xl bg-slate-900/80 px-4 py-3 text-slate-300 ring-1 ring-slate-700">
+                    <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Connected account</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{user?.accountId || 'N/A'}</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+                  <div className="rounded-3xl bg-slate-900/80 px-4 py-3 text-sm text-slate-300 ring-1 ring-slate-700">
+                    <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Deriv status</p>
+                    <p className="mt-1 font-medium text-white">{status}</p>
+                  </div>
+                  <div className={`rounded-3xl px-4 py-3 text-sm font-semibold ${connectionColor}`}>
+                    {status === 'connected' ? 'Live stream' : status === 'connecting' ? 'Connecting' : 'Offline'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="rounded-3xl bg-slate-900/80 px-4 py-3 text-slate-300 ring-1 ring-slate-700">
+                  <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Market health</p>
+                  <p className="mt-1 text-sm text-white">{websiteStatus?.markets || 'Live'}</p>
+                </div>
+                <Button className="min-w-[148px]" variant="danger" onClick={logout}>
+                  Logout
+                </Button>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            {user && (
-              <div className="text-right">
-                <p className="text-white font-semibold">Account: {user.accountId}</p>
-                <p className="text-gray-400 text-sm">Logged in</p>
-              </div>
-            )}
-            <Button onClick={logout} variant="secondary">
-              Logout
-            </Button>
-          </div>
-        </div>
 
-        {/* Top Stats */}
-        <div className="grid md:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm mb-2">Account Balance</p>
-                <p className="text-3xl font-bold text-white">
-                  ${balance ? balance.toFixed(2) : '0.00'}
-                </p>
+          <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="space-y-6">
+              <div className="rounded-[28px] border border-slate-800 bg-slate-950/90 p-5 shadow-glow backdrop-blur-glass">
+                <h2 className="text-lg font-semibold text-white">Dashboard Menu</h2>
+                <p className="mt-2 text-sm text-slate-400">Navigate the Deriv portfolio and explore fast action workflows.</p>
+                <div className="mt-6 space-y-2">
+                  {[
+                    { label: 'Dashboard', url: '/dashboard' },
+                    { label: 'Markets', url: '/trading' },
+                    { label: 'DTrader', url: 'https://app.deriv.com/desktop', external: true },
+                    { label: 'Bots', url: '/bots' },
+                    { label: 'Copy Trading', url: '/copy-trading' },
+                    { label: 'AI Analysis', url: '/ai-analysis' },
+                    { label: 'Settings', url: '/settings' },
+                  ].map((item) => (
+                    item.external ? (
+                      <a
+                        key={item.label}
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between rounded-3xl border border-slate-800 bg-slate-900/90 px-4 py-3 text-sm text-slate-300 transition hover:border-cyan-400 hover:text-white"
+                      >
+                        <span>{item.label}</span>
+                        <ArrowRight size={16} />
+                      </a>
+                    ) : (
+                      <Link
+                        key={item.label}
+                        to={item.url}
+                        className="flex items-center justify-between rounded-3xl border border-slate-800 bg-slate-900/90 px-4 py-3 text-sm text-slate-300 transition hover:border-cyan-400 hover:text-white"
+                      >
+                        <span>{item.label}</span>
+                        <ArrowRight size={16} />
+                      </Link>
+                    )
+                  ))}
+                </div>
               </div>
-              <div className="w-12 h-12 bg-blue-600 bg-opacity-20 rounded-lg flex items-center justify-center">
-                <DollarSign className="text-blue-400" size={24} />
-              </div>
-            </div>
-          </Card>
 
-          <Card>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm mb-2">Today's P&L</p>
-                <p className="text-3xl font-bold text-green-400">+$1,250.50</p>
-              </div>
-              <div className="w-12 h-12 bg-green-600 bg-opacity-20 rounded-lg flex items-center justify-center">
-                <TrendingUp className="text-green-400" size={24} />
-              </div>
-            </div>
-          </Card>
+              <MarketSidebar
+                activeSymbols={activeSymbols}
+                selectedSymbol={selectedSymbol}
+                onSelectSymbol={setSelectedSymbol}
+              />
+            </aside>
 
-          <Card>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm mb-2">Win Rate</p>
-                <p className="text-3xl font-bold text-white">65.2%</p>
-              </div>
-              <div className="w-12 h-12 bg-purple-600 bg-opacity-20 rounded-lg flex items-center justify-center">
-                <Activity className="text-purple-400" size={24} />
-              </div>
-            </div>
-          </Card>
-
-          <Card>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-400 text-sm mb-2">Open Trades</p>
-                <p className="text-3xl font-bold text-white">3</p>
-              </div>
-              <div className="w-12 h-12 bg-orange-600 bg-opacity-20 rounded-lg flex items-center justify-center">
-                <TrendingDown className="text-orange-400" size={24} />
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Market Overview */}
-          <div className="lg:col-span-2">
-            <Card>
-              <h2 className="text-xl font-semibold text-white mb-6">Market Overview</h2>
-              <div className="space-y-4">
-                {activeSymbols.map((index) => (
-                  <div
-                    key={index.symbol}
-                    onClick={() => setSelectedSymbol(index.symbol)}
-                    className={`p-4 rounded-lg cursor-pointer transition ${
-                      selectedSymbol === index.symbol
-                        ? 'bg-blue-600 bg-opacity-20 border border-blue-500'
-                        : 'bg-slate-700 hover:bg-slate-600 border border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-white">{index.name}</p>
-                        <p className="text-sm text-gray-400">{index.symbol}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-white">$1,234.56</p>
-                        <p className="text-sm text-green-400">+2.45%</p>
-                      </div>
+            <main className="space-y-6">
+              <section className="grid gap-6 lg:grid-cols-2">
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Total Balance</p>
+                      <p className="mt-3 text-4xl font-semibold text-white">{formatCurrency(totalBalance, activeAccount?.currency)}</p>
+                    </div>
+                    <div className="rounded-3xl bg-cyan-500/15 px-4 py-3 text-cyan-200 ring-1 ring-cyan-400/20">
+                      {accountCount} accounts
                     </div>
                   </div>
-                ))}
-              </div>
-            </Card>
-          </div>
+                </Card>
 
-          {/* Quick Actions */}
-          <div>
-            <Card>
-              <h2 className="text-xl font-semibold text-white mb-6">Quick Actions</h2>
-              <div className="space-y-3">
-                <Button
-                  onClick={() => window.open('https://partner-tracking.deriv.com/click?a=14252&o=1&c=3&link_id=1', '_blank')}
-                  className="w-full bg-green-600 hover:bg-green-700"
-                >
-                  Start Trading
-                </Button>
-                <Button
-                  onClick={() => navigate('/trading')}
-                  variant="secondary"
-                  className="w-full"
-                >
-                  In-App Trading
-                </Button>
-                <Button
-                  onClick={() => navigate('/bots')}
-                  variant="secondary"
-                  className="w-full"
-                >
-                  Run Bots
-                </Button>
-                <Button
-                  onClick={() => navigate('/copy-trading')}
-                  variant="secondary"
-                  className="w-full"
-                >
-                  Copy Trading
-                </Button>
-                <Button
-                  onClick={() => navigate('/ai-analysis')}
-                  variant="secondary"
-                  className="w-full"
-                >
-                  AI Analysis
-                </Button>
-              </div>
-            </Card>
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Active Account</p>
+                      <p className="mt-3 text-4xl font-semibold text-white">{accountTypeLabel(activeAccount)}</p>
+                    </div>
+                    <div className="rounded-full bg-slate-900/90 px-4 py-3 text-slate-200 ring-1 ring-slate-700">
+                      {activeAccount?.currency || 'USD'}
+                    </div>
+                  </div>
+                </Card>
+              </section>
 
-            {/* Deriv Links */}
-            <Card className="mt-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Deriv Account</h3>
-              <div className="space-y-2">
-                <a
-                  href="https://deriv.com/cashier/deposit"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-gray-300 hover:text-white transition text-center"
-                >
-                  Deposit
-                </a>
-                <a
-                  href="https://deriv.com/cashier/withdrawal"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-gray-300 hover:text-white transition text-center"
-                >
-                  Withdraw
-                </a>
+              <section className="rounded-[32px] border border-slate-800 bg-slate-950/90 p-6 shadow-glow backdrop-blur-glass">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Account selector</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-white">All accounts at a glance</h2>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:auto-cols-min lg:grid-flow-col">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setSelectedTimeframe(60)}
+                      className={`${selectedTimeframe === 60 ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400' : ''}`}
+                    >
+                      1m
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setSelectedTimeframe(300)}
+                      className={`${selectedTimeframe === 300 ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400' : ''}`}
+                    >
+                      5m
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setSelectedTimeframe(900)}
+                      className={`${selectedTimeframe === 900 ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400' : ''}`}
+                    >
+                      15m
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {accounts.map((account) => {
+                    const isSelected = selectedAccount?.account_number === account.account_number || selectedAccount?.loginid === account.loginid;
+                    return (
+                      <button
+                        key={account.account_number || account.loginid || account.loginid}
+                        type="button"
+                        onClick={() => setSelectedAccount(account)}
+                        className={`group rounded-[26px] border p-5 text-left transition ${
+                          isSelected
+                            ? 'border-cyan-400 bg-cyan-400/10 shadow-[0_0_40px_rgba(34,211,238,0.12)]'
+                            : 'border-slate-800 bg-slate-900/90 hover:border-slate-700 hover:bg-slate-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm uppercase tracking-[0.32em] text-slate-400">{accountTypeLabel(account)}</p>
+                            <p className="mt-2 text-lg font-semibold text-white">{formatCurrency(account.balance, account.currency)}</p>
+                          </div>
+                          <div className="rounded-2xl bg-slate-950 px-3 py-2 text-xs uppercase tracking-[0.25em] text-slate-300">
+                            {account.currency || 'USD'}
+                          </div>
+                        </div>
+                        <p className="mt-4 text-sm text-slate-400">{account.account_number || account.loginid}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <TradeChart />
+
+              <div className="grid gap-6 xl:grid-cols-3">
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Unrealized P/L</p>
+                      <p className="mt-3 text-3xl font-semibold text-white">{formatCurrency(profitLoss, activeAccount?.currency)}</p>
+                    </div>
+                    <div className="rounded-full bg-slate-900/80 px-4 py-3 text-slate-300 ring-1 ring-slate-700">
+                      {openPositions.length} Positions
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Live Market</p>
+                      <p className="mt-3 text-3xl font-semibold text-white">{selectedSymbol || '---'}</p>
+                    </div>
+                    <div className="rounded-full bg-emerald-500/10 px-4 py-3 text-emerald-200 ring-1 ring-emerald-500/20">
+                      {activeSymbols.length} symbols
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Live status</p>
+                      <p className="mt-3 text-3xl font-semibold text-white">
+                        {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Disconnected'}
+                      </p>
+                    </div>
+                    <CircleDot size={32} className={status === 'connected' ? 'text-emerald-400' : status === 'connecting' ? 'text-amber-400' : 'text-rose-400'} />
+                  </div>
+                </Card>
               </div>
-            </Card>
+
+              <div className="grid gap-6 xl:grid-cols-2">
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Recent Trades</p>
+                      <h3 className="mt-2 text-xl font-semibold text-white">Latest activity</h3>
+                    </div>
+                    <Sparkles size={20} className="text-cyan-300" />
+                  </div>
+                  <div className="mt-6 space-y-4">
+                    {recentTrades.length ? (
+                      recentTrades.map((trade) => (
+                        <div key={trade.id} className="rounded-3xl border border-slate-800 bg-slate-900/90 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-white">{trade.symbol}</p>
+                              <p className="text-sm text-slate-400">{trade.status}</p>
+                            </div>
+                            <div className="text-right text-sm">
+                              <p className="font-semibold text-slate-100">{formatCurrency(trade.amount, activeAccount?.currency)}</p>
+                              <p className={trade.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{trade.profit >= 0 ? `+${formatCurrency(trade.profit, activeAccount?.currency)}` : formatCurrency(trade.profit, activeAccount?.currency)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-4 text-sm text-slate-400">No recent trades available yet.</div>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="rounded-[28px] p-6 bg-slate-950/90 shadow-glow backdrop-blur-glass border border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.32em] text-cyan-300/80">Open Positions</p>
+                      <h3 className="mt-2 text-xl font-semibold text-white">Managing capital</h3>
+                    </div>
+                    <Activity size={20} className="text-cyan-300" />
+                  </div>
+                  <div className="mt-6 space-y-4">
+                    {openPositions.length ? (
+                      openPositions.slice(0, 4).map((position) => (
+                        <div key={position.contract_id || position.transaction_id || position.underlying} className="rounded-3xl border border-slate-800 bg-slate-900/90 p-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="font-semibold text-white">{position.underlying || position.symbol || 'Unknown'}</p>
+                              <p className="text-sm text-slate-400">{position.longcode || position.contract_type || 'Active position'}</p>
+                            </div>
+                            <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
+                              {position.is_sold ? 'Closed' : 'Open'}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-4 text-sm text-slate-400">No open positions at the moment.</div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            </main>
           </div>
         </div>
-
-        {/* Recent Activity */}
-        <Card className="mt-8">
-          <h2 className="text-xl font-semibold text-white mb-6">Recent Activity</h2>
-          <div className="space-y-4">
-            {[
-              { time: '2 min ago', action: 'BUY', symbol: 'R_25', amount: '$500', status: 'Won', profit: '+$125' },
-              { time: '15 min ago', action: 'BUY', symbol: 'R_50', amount: '$250', status: 'Lost', profit: '-$62' },
-              { time: '1 hour ago', action: 'BUY', symbol: 'R_10', amount: '$100', status: 'Won', profit: '+$45' },
-            ].map((activity, i) => (
-              <div key={i} className="flex items-center justify-between p-4 bg-slate-700 rounded-lg">
-                <div className="flex-1">
-                  <p className="font-semibold text-white">
-                    {activity.action} {activity.symbol}
-                  </p>
-                  <p className="text-sm text-gray-400">{activity.time}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-white">{activity.amount}</p>
-                  <p className={activity.status === 'Won' ? 'text-green-400' : 'text-red-400'}>
-                    {activity.profit}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
       </div>
     </div>
   );

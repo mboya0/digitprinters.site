@@ -15,6 +15,8 @@ export const TradingProvider = ({ children }) => {
   const [selectedSymbol, setSelectedSymbol] = useState('');
   const [selectedTimeframe, setSelectedTimeframe] = useState(60);
   const [balance, setBalance] = useState(0);
+  const [openPositions, setOpenPositions] = useState([]);
+  const [recentTrades, setRecentTrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [websiteStatus, setWebsiteStatus] = useState(null);
@@ -30,10 +32,34 @@ export const TradingProvider = ({ children }) => {
 
     try {
       const response = await deriv.getBalance();
-      setBalance(response.balance?.balance || 0);
+      setBalance(Number(response.balance?.balance) || 0);
     } catch (err) {
       console.error('Error fetching balance:', err);
       setError(err.message || 'Balance request failed');
+    }
+  }, [deriv]);
+
+  const fetchPortfolio = useCallback(async () => {
+    if (!deriv || !deriv.isConnected()) return;
+
+    try {
+      const response = await deriv.getOpenContracts();
+      const portfolio = Array.isArray(response.portfolio) ? response.portfolio : [];
+      setOpenPositions(portfolio);
+      setRecentTrades(
+        portfolio
+          .slice(0, 5)
+          .map((position) => ({
+            id: position.contract_id || position.transaction_id || `${position.symbol}-${position.entry_spot}`,
+            symbol: position.underlying || position.symbol || 'Unknown',
+            action: position.longcode?.includes('Rise') || position.contract_type?.includes('CALL') ? 'BUY' : 'SELL',
+            amount: Number(position.buy_price || position.stake || 0),
+            profit: Number(position.profit) || 0,
+            status: position.is_sold ? 'Closed' : 'Open',
+          }))
+      );
+    } catch (err) {
+      console.error('Error fetching portfolio:', err);
     }
   }, [deriv]);
 
@@ -42,10 +68,15 @@ export const TradingProvider = ({ children }) => {
 
     setLoading(true);
     fetchBalance();
-    const refresh = setInterval(fetchBalance, 30000);
+    fetchPortfolio();
+    const balanceInterval = setInterval(fetchBalance, 30000);
+    const portfolioInterval = setInterval(fetchPortfolio, 45000);
 
-    return () => clearInterval(refresh);
-  }, [deriv, fetchBalance]);
+    return () => {
+      clearInterval(balanceInterval);
+      clearInterval(portfolioInterval);
+    };
+  }, [deriv, fetchBalance, fetchPortfolio]);
 
   useEffect(() => {
     if (!deriv || !deriv.isConnected()) return;
@@ -106,6 +137,8 @@ export const TradingProvider = ({ children }) => {
         syntheticIndices,
         selectedSymbol,
         selectedTimeframe,
+        openPositions,
+        recentTrades,
         loading,
         error,
         websiteStatus,

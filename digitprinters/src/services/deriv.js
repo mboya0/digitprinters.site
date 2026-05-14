@@ -217,8 +217,12 @@ class DerivWebSocket {
     return this.send({ active_symbols: 'brief', product_type: market });
   }
 
-  async getBalance() {
-    return this.send({ balance: 1 });
+  async getAccountList() {
+    return this.send({ account_list: 1 });
+  }
+
+  async getBalance(accountId) {
+    return this.send({ balance: 1, account: accountId });
   }
 
   async getProposal(proposal) {
