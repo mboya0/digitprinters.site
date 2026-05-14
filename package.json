@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "cd digitprinters && npm run dev",
     "build": "cd digitprinters && npm run build",
+    "vercel-build": "cd digitprinters && npm run build",
     "preview": "cd digitprinters && npm run preview",
     "lint": "cd digitprinters && npm run lint"
   }
