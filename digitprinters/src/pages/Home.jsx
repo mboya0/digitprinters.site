@@ -77,6 +77,9 @@ export default function Home() {
                 Create Account
               </a>
             </div>
+            <p className="mt-4 text-sm text-slate-400">
+              On login, Deriv will request secure read/write permissions for account balances, trading access, and synthetic markets.
+            </p>
           </div>
         </div>
       </div>

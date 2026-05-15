@@ -18,7 +18,8 @@ const Settings = React.lazy(() => import('./pages/Settings'));
 const Callback = React.lazy(() => import('./pages/Callback'));
 const ProtectedRoute = React.lazy(() => import('./components/common/ProtectedRoute'));
 
-const CANONICAL_HOST = 'digitprinters.site';
+const CANONICAL_HOST = 'www.digitprinters.site';
+const NON_CANONICAL_HOST = 'digitprinters.site';
 
 const logApp = (msg, data) => {
   console.info(`[App] ${msg}`, {
@@ -189,15 +190,14 @@ function App() {
       userAgent: navigator.userAgent?.substring(0, 100),
     });
 
-    // Only redirect if we're definitely on www subdomain and not in a redirect loop
-    if (currentHost === `www.${CANONICAL_HOST}` && !currentSearch.includes('redirected')) {
-      const destination = `https://${CANONICAL_HOST}${currentPath}${currentSearch}${currentHash}&redirected=1`;
-      logApp('Redirecting from www to canonical host', {
+    if (currentHost === NON_CANONICAL_HOST && !currentSearch.includes('redirected')) {
+      const separator = currentSearch ? '&' : '?';
+      const destination = `https://${CANONICAL_HOST}${currentPath}${currentSearch}${separator}redirected=1${currentHash}`;
+      logApp('Redirecting to canonical host', {
         from: currentHost,
         to: destination,
       });
-      // Use SafeRedirect component instead of direct window.location
-      return;
+      window.location.replace(destination);
     }
   }, []);
 

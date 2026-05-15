@@ -98,6 +98,13 @@ export const AuthProvider = ({ children }) => {
   });
   const [loginStatus, setLoginStatus] = useState(accessToken ? 'pending' : 'unauthenticated');
 
+  const ensureDeriv = useCallback(() => {
+    if (deriv) return deriv;
+    const instance = initDeriv();
+    setDeriv(instance);
+    return instance;
+  }, [deriv]);
+
   const logout = useCallback(() => {
     try {
       logOAuth('User logout initiated', { timestamp: new Date().toISOString() });
@@ -493,14 +500,13 @@ export const AuthProvider = ({ children }) => {
           timestamp: new Date().toISOString(),
         });
 
-        if (deriv) {
-          deriv.setToken(data.access_token);
-          await deriv.connect();
+        const derivInstance = ensureDeriv();
+        derivInstance.setToken(data.access_token);
+        await derivInstance.connect();
 
-          logOAuth('Websocket connected successfully', {
-            timestamp: new Date().toISOString(),
-          });
-        }
+        logOAuth('Websocket connected successfully', {
+          timestamp: new Date().toISOString(),
+        });
 
         const redirectPath = getPostLoginRedirect();
         logOAuth('OAuth callback completed', {

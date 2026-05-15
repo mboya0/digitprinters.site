@@ -2,7 +2,7 @@
 
 ## Overview
 
-DigitPrinters uses Deriv's official OAuth 2.0 authorization flow for secure user authentication. This guide covers the complete setup, configuration, and troubleshooting.
+DigitPrinters uses Deriv's official OAuth 2.0 authorization flow for secure user authentication. This guide covers the complete setup, configuration, and troubleshooting for production `https://www.digitprinters.site`.
 
 ---
 
@@ -16,17 +16,17 @@ User clicks "Login with Deriv"
 App generates OAuth state token
   ↓
 Redirect to: https://oauth.deriv.com/oauth2/authorize
-  ├─ client_id=332LK4VWd9A4pEEfTMn53
-  ├─ redirect_uri=https://digitprinters.site/auth/callback
+  ├─ client_id=<NEW_OAUTH_CLIENT_ID>
+  ├─ redirect_uri=https://www.digitprinters.site/auth/callback
   ├─ scope=read+write
   └─ state=<random_state>
   ↓
 User sees Deriv authorization screen
   ├─ Shows app name
-  ├─ Shows requested scopes
+  ├─ Shows requested scopes and permissions
   └─ User clicks "Authorize" or "Decline"
   ↓
-Deriv redirects to: https://digitprinters.site/auth/callback?code=<code>&state=<state>
+Deriv redirects to: https://www.digitprinters.site/auth/callback?code=<code>&state=<state>
   ↓
 Callback page validates state and exchanges code
   ↓
@@ -41,7 +41,7 @@ App stores tokens in localStorage
   └─ deriv_token_expiry
   ↓
 App connects websocket with access token
-  └─ wss://ws.derivws.com/websockets/v3?app_id=332LK4VWd9A4pEEfTMn53
+  └─ wss://ws.derivws.com/websockets/v3?app_id=134275
   ↓
 Websocket authorizes with token
   ├─ send { authorize: <access_token> }
@@ -60,11 +60,13 @@ User is logged in and sees dashboard
 
 ```env
 # Client-side (visible in browser)
-VITE_DERIV_APP_ID=332LK4VWd9A4pEEfTMn53
-VITE_DERIV_OAUTH_REDIRECT_URI=https://digitprinters.site/auth/callback
+VITE_DERIV_OAUTH_CLIENT_ID=<NEW_OAUTH_CLIENT_ID>
+VITE_DERIV_OAUTH_REDIRECT_URI=http://localhost:5173/auth/callback
 
-# For local testing with localhost
-# VITE_DERIV_OAUTH_REDIRECT_URI=http://localhost:5173/auth/callback
+# Backend / server-side values are not committed
+# DERIV_OAUTH_CLIENT_SECRET=<your_client_secret>
+# DERIV_OAUTH_CLIENT_ID=<NEW_OAUTH_CLIENT_ID>
+# DERIV_OAUTH_REDIRECT_URI=http://localhost:5173/auth/callback
 ```
 
 #### Production (Vercel Environment Variables)
@@ -73,15 +75,15 @@ Set these in Vercel dashboard → Settings → Environment Variables:
 
 **Client-side:**
 ```
-VITE_DERIV_APP_ID=332LK4VWd9A4pEEfTMn53
-VITE_DERIV_OAUTH_REDIRECT_URI=https://digitprinters.site/auth/callback
+VITE_DERIV_OAUTH_CLIENT_ID=<NEW_OAUTH_CLIENT_ID>
+VITE_DERIV_OAUTH_REDIRECT_URI=https://www.digitprinters.site/auth/callback
 ```
 
 **Server-side (Backend API):**
 ```
 DERIV_OAUTH_CLIENT_SECRET=<your_client_secret>
-DERIV_OAUTH_CLIENT_ID=332LK4VWd9A4pEEfTMn53
-DERIV_OAUTH_REDIRECT_URI=https://digitprinters.site/auth/callback
+DERIV_OAUTH_CLIENT_ID=<NEW_OAUTH_CLIENT_ID>
+DERIV_OAUTH_REDIRECT_URI=https://www.digitprinters.site/auth/callback
 ```
 
 ### 2. Deriv App Configuration
@@ -93,12 +95,12 @@ Log in to [Deriv API Dashboard](https://app.deriv.com/account/api-token):
    - **App Name**: DigitPrinters
    - **App Category**: Trading Platform
    - **Redirect URIs**:
-     - Production: `https://digitprinters.site/auth/callback`
-     - Staging: `https://staging.digitprinters.site/auth/callback` (if applicable)
+     - Production: `https://www.digitprinters.site/auth/callback`
+     - Non-www alias: `https://digitprinters.site/auth/callback`
      - Local: `http://localhost:5173/auth/callback` (for local development)
 
 3. Note the generated:
-   - **App ID**: 332LK4VWd9A4pEEfTMn53
+   - **OAuth Client ID**: `<NEW_OAUTH_CLIENT_ID>`
    - **Client Secret**: (Keep this secret! Never commit to repo)
 
 ### 3. Vercel Configuration
@@ -111,8 +113,8 @@ In Vercel dashboard for the project:
    - Add `DERIV_OAUTH_REDIRECT_URI`
 
 2. **Settings → Domains**
-   - Ensure primary domain is `digitprinters.site`
-   - Verify www redirect is configured
+   - Ensure primary production domain is `www.digitprinters.site`
+   - Verify non-www traffic is redirected to `www`
 
 ---
 
@@ -195,7 +197,7 @@ Backend API for secure token exchange:
   ```json
   {
     "code": "authorization_code_from_deriv",
-    "redirect_uri": "https://digitprinters.site/auth/callback"
+    "redirect_uri": "https://www.digitprinters.site/auth/callback"
   }
   ```
 - **Response**:
@@ -213,6 +215,7 @@ Backend API for secure token exchange:
 Manages websocket connection:
 
 - Connects to `wss://ws.derivws.com/websockets/v3`
+- Uses legacy websocket app_id: `134275`
 - Authorizes with OAuth token: `{ authorize: access_token }`
 - Handles reconnection logic
 - Manages live tick subscriptions
@@ -275,7 +278,7 @@ Check Vercel dashboard:
 
 **Solution**:
 1. Clear localStorage (DevTools → Application)
-2. Clear browser cookies for digitprinters.site
+2. Clear browser cookies for `www.digitprinters.site`
 3. Try logging in again
 4. Check if redirect URI domain changed
 
@@ -307,8 +310,8 @@ Check Vercel dashboard:
 1. Go to [Deriv API Dashboard](https://app.deriv.com/account/api-token)
 2. Edit app configuration
 3. Add all redirect URIs:
-   - `https://digitprinters.site/auth/callback`
    - `https://www.digitprinters.site/auth/callback`
+   - `https://digitprinters.site/auth/callback`
    - `http://localhost:5173/auth/callback` (local dev)
 4. Save changes
 5. Clear browser cache and try again
@@ -320,8 +323,9 @@ Check Vercel dashboard:
 Before deploying to production:
 
 - [ ] Set `DERIV_OAUTH_CLIENT_SECRET` in Vercel Environment Variables
-- [ ] Verify Deriv app ID is `332LK4VWd9A4pEEfTMn53`
-- [ ] Add `https://digitprinters.site/auth/callback` to Deriv app redirect URIs
+- [ ] Verify Deriv OAuth client ID is configured in Vercel
+- [ ] Add `https://www.digitprinters.site/auth/callback` to Deriv app redirect URIs
+- [ ] Add `https://digitprinters.site/auth/callback` as a non-www alias if needed
 - [ ] Verify `.env` is in `.gitignore` (never commit secrets)
 - [ ] Test login flow end-to-end on staging
 - [ ] Check browser console for any errors

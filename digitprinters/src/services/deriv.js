@@ -1,4 +1,5 @@
-const DERIV_APP_ID = import.meta.env.VITE_DERIV_APP_ID || '332LK4VWd9A4pEEfTMn53';
+// Legacy Deriv websocket app id used only for websocket connectivity and market subscriptions
+const DERIV_APP_ID = '134275';
 const DERIV_WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${DERIV_APP_ID}`;
 
 // ==================== Logging Utilities ====================
