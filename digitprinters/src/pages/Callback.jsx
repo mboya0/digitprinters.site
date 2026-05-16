@@ -32,14 +32,26 @@ export default function Callback() {
     const state = searchParams.get('state');
     const errorParam = searchParams.get('error');
     const errorDescription = searchParams.get('error_description');
+    const callbackParams = Object.fromEntries(searchParams.entries());
 
     logCallback('OAuth callback page loaded', {
       hasCode: !!code,
+      codeLength: code?.length || 0,
       hasState: !!state,
       hasError: !!errorParam,
       errorParam,
+      params: callbackParams,
+      paramKeys: Object.keys(callbackParams),
       path: window.location.pathname,
       search: window.location.search,
+    });
+    console.info('[Callback] Deriv OAuth callback params', {
+      code,
+      state,
+      error: errorParam,
+      error_description: errorDescription,
+      params: callbackParams,
+      url: window.location.href,
     });
 
     // Check for OAuth error from Deriv

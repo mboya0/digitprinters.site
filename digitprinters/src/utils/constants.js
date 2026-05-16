@@ -57,10 +57,8 @@ const CANONICAL_APP_URL = 'https://www.digitprinters.site';
 export const DERIV_OAUTH_CONFIG = {
   authorize_url: 'https://oauth.deriv.com/oauth2/authorize',
   token_url: 'https://oauth.deriv.com/oauth2/token',
-  client_id:
-    import.meta.env.VITE_DERIV_OAUTH_CLIENT_ID || import.meta.env.VITE_DERIV_APP_ID || '332LK4VWd9A4pEEfTMn53',
-  redirect_uri:
-    import.meta.env.VITE_DERIV_OAUTH_REDIRECT_URI || `${CANONICAL_APP_URL}/auth/callback`,
+  client_id: '332LK4VWd9A4pEEfTMn53',
+  redirect_uri: `${CANONICAL_APP_URL}/auth/callback`,
   scope: 'read write',
   response_type: 'code',
 };
