@@ -555,7 +555,19 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const handleCallback = useCallback(
-    async (code, state) => {
+    async (callbackInput, stateArg) => {
+      const callbackData =
+        typeof callbackInput === 'object' && callbackInput !== null
+          ? callbackInput
+          : { code: callbackInput, state: stateArg };
+      const {
+        code,
+        state,
+        accessToken: tokenFromCallback,
+        expiresIn,
+        params: callbackParams = {},
+      } = callbackData;
+
       setLoading(true);
       setError(null);
       const storedState = getStoredState();
@@ -563,12 +575,15 @@ export const AuthProvider = ({ children }) => {
       logOAuth('OAuth callback received', {
         path: window.location.pathname,
         hasCode: !!code,
+        hasDirectToken: !!tokenFromCallback,
         hasState: !!state,
         stateMatches: state === storedState,
+        storedStateExists: !!storedState,
+        paramKeys: Object.keys(callbackParams),
         timestamp: new Date().toISOString(),
       });
 
-      if (!storedState || storedState !== state) {
+      if (storedState && state && storedState !== state) {
         const errorMsg = 'Invalid OAuth state. Please try logging in again.';
         logOAuthError('State validation failed', {
           storedState: storedState?.substring(0, 8) + '...',
@@ -579,9 +594,49 @@ export const AuthProvider = ({ children }) => {
         throw new Error(errorMsg);
       }
 
+      if (!code && tokenFromCallback) {
+        try {
+          const expiry = expiresIn ? Date.now() + Number(expiresIn) * 1000 : null;
+          localStorage.setItem('deriv_access_token', tokenFromCallback);
+          localStorage.setItem('deriv_refresh_token', '');
+          if (expiry) {
+            localStorage.setItem('deriv_token_expiry', String(expiry));
+          }
+
+          logOAuth('Direct OAuth token received in callback', {
+            tokenLength: tokenFromCallback.length,
+            expiresIn,
+            expiryTime: expiry ? new Date(expiry).toISOString() : null,
+          });
+
+          setAccessToken(tokenFromCallback);
+          setRefreshToken('');
+          setTokenExpiry(expiry);
+          const redirectPath = getPostLoginRedirect();
+          clearStoredAuthState();
+          await initializeAuthenticatedSession(tokenFromCallback, 'callback-token');
+          return redirectPath;
+        } catch (err) {
+          const errorMsg = err.message || 'OAuth token callback failed';
+          logOAuthError('Direct token callback processing failed', {
+            error: errorMsg,
+            stack: err.stack,
+          });
+          setError(errorMsg);
+          setLoginStatus('unauthenticated');
+          throw err;
+        } finally {
+          setLoading(false);
+        }
+      }
+
       if (!code) {
         const errorMsg = 'No authorization code received from Deriv';
-        logOAuthError('Missing authorization code', { code });
+        logOAuthError('Missing authorization code', {
+          code,
+          hasDirectToken: !!tokenFromCallback,
+          paramKeys: Object.keys(callbackParams),
+        });
         clearStoredAuthState();
         throw new Error(errorMsg);
       }
