@@ -15,7 +15,7 @@ const logHome = (msg, data) => {
 };
 
 export default function Home() {
-  const { login, isAuthenticated, loading } = useAuth();
+  const { login, isAuthenticated = false, loading = false } = useAuth() || {};
   const navigate = useNavigate();
 
   // Redirect to dashboard if already authenticated
@@ -31,7 +31,7 @@ export default function Home() {
       isAuthenticated,
       loading,
     });
-    if (!isAuthenticated && !loading) {
+    if (!isAuthenticated && !loading && typeof login === 'function') {
       login();
     }
   };
