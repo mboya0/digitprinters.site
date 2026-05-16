@@ -40,26 +40,26 @@ const accountTypeLabel = (account) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const {
-    isAuthenticated,
-    loading: authLoading,
+    isAuthenticated = false,
+    loading: authLoading = false,
     user,
-    accounts,
+    accounts = [],
     selectedAccount,
     setSelectedAccount,
-    status,
+    status = 'disconnected',
     websiteStatus,
     logout,
-  } = useAuth();
+  } = useAuth() || {};
   const {
     selectedSymbol,
     setSelectedSymbol,
-    activeSymbols,
+    activeSymbols = [],
     selectedTimeframe,
     setSelectedTimeframe,
-    loading: tradingLoading,
-    openPositions,
-    recentTrades,
-  } = useTrading();
+    loading: tradingLoading = false,
+    openPositions = [],
+    recentTrades = [],
+  } = useTrading() || {};
 
   useEffect(() => {
     if (!isAuthenticated && !authLoading) {
@@ -67,24 +67,24 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, authLoading, navigate]);
 
-  const activeAccount = selectedAccount || accounts[0] || null;
+  const activeAccount = selectedAccount || (Array.isArray(accounts) && accounts[0]) || null;
   const totalBalance = useMemo(
-    () => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0),
+    () => (Array.isArray(accounts) ? accounts.reduce((sum, account) => sum + Number(account?.balance || 0), 0) : 0),
     [accounts]
   );
   const profitLoss = useMemo(
-    () => openPositions.reduce((sum, position) => sum + Number(position.profit || 0), 0),
+    () => (Array.isArray(openPositions) ? openPositions.reduce((sum, position) => sum + Number(position?.profit || 0), 0) : 0),
     [openPositions]
   );
-  const accountCount = accounts.length;
+  const accountCount = Array.isArray(accounts) ? accounts.length : 0;
   const connectionColor = status === 'connected' ? 'bg-emerald-500 text-emerald-100' : status === 'connecting' ? 'bg-amber-500 text-slate-950' : 'bg-rose-500 text-white';
 
   if (authLoading || tradingLoading) {
-    return <LoadingSpinner fullScreen />;
+    return <LoadingSpinner fullScreen message="Loading dashboard..." />;
   }
 
   if (!isAuthenticated) {
-    return <LoadingSpinner fullScreen />;
+    return <LoadingSpinner fullScreen message="Verifying session..." />;
   }
 
   return (
@@ -99,7 +99,7 @@ export default function Dashboard() {
                   <Logo />
                   <div className="rounded-3xl bg-slate-900/80 px-4 py-3 text-slate-300 ring-1 ring-slate-700">
                     <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Connected account</p>
-                    <p className="mt-1 text-sm font-semibold text-white">{user?.accountId || 'N/A'}</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{user?.accountId || user?.loginid || 'N/A'}</p>
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
@@ -117,7 +117,7 @@ export default function Dashboard() {
                   <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Market health</p>
                   <p className="mt-1 text-sm text-white">{websiteStatus?.markets || 'Live'}</p>
                 </div>
-                <Button className="min-w-[148px]" variant="danger" onClick={logout}>
+                <Button className="min-w-[148px]" variant="danger" onClick={() => logout && logout()}>
                   Logout
                 </Button>
               </div>

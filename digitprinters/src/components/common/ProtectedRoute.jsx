@@ -10,11 +10,18 @@ const logProtectedRoute = (msg, data) => {
 };
 
 export default function ProtectedRoute() {
-  const { isAuthenticated, loading, loginStatus, error, accessToken, initializationStep } = useAuth();
+  const {
+    isAuthenticated = false,
+    loading = false,
+    loginStatus = 'unauthenticated',
+    error = null,
+    accessToken = null,
+    initializationStep = ''
+  } = useAuth() || {};
   const location = useLocation();
 
   logProtectedRoute('ProtectedRoute check', {
-    path: location.pathname,
+    path: location?.pathname,
     isAuthenticated,
     loading,
     loginStatus,
@@ -40,8 +47,12 @@ export default function ProtectedRoute() {
       attemptedPath: location.pathname,
     });
     // Store the attempted path so we can redirect after login
-    const redirectTo = location.pathname + location.search;
-    localStorage.setItem('deriv_post_login_redirect', redirectTo);
+    const redirectTo = (location?.pathname || '/') + (location?.search || '');
+    try {
+      localStorage.setItem('deriv_post_login_redirect', redirectTo);
+    } catch (err) {
+      console.warn('[ProtectedRoute] Failed to set post-login redirect:', err);
+    }
     return <Navigate to="/" replace />;
   }
 
