@@ -24,6 +24,19 @@ const logError = (msg, error, data) => {
   });
 };
 
+const parseRequestBody = (request) => {
+  if (!request.body) return {};
+  if (typeof request.body === 'object') return request.body;
+  if (typeof request.body === 'string') {
+    try {
+      return JSON.parse(request.body);
+    } catch {
+      return Object.fromEntries(new URLSearchParams(request.body));
+    }
+  }
+  return {};
+};
+
 export default async function handler(request, response) {
   const requestId = Math.random().toString(36).substring(7);
   
@@ -40,7 +53,8 @@ export default async function handler(request, response) {
   });
 
   try {
-    const { code, grant_type, refresh_token, redirect_uri } = await request.json();
+    const requestBody = parseRequestBody(request);
+    const { code, grant_type, refresh_token, redirect_uri } = requestBody;
     
     const clientId =
       process.env.DERIV_OAUTH_CLIENT_ID ||
@@ -59,6 +73,8 @@ export default async function handler(request, response) {
       requestId,
       hasClientId: !!clientId,
       hasClientSecret: !!clientSecret,
+      bodyKeys: Object.keys(requestBody),
+      hasCode: !!code,
       redirectUri,
       grantType: grant_type || 'authorization_code',
     });

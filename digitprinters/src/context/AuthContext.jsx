@@ -604,18 +604,26 @@ export const AuthProvider = ({ children }) => {
           }),
         });
 
-        const data = await response.json();
+        const responseText = await response.text();
+        let data = {};
+        try {
+          data = responseText ? JSON.parse(responseText) : {};
+        } catch {
+          data = { error: responseText || 'Invalid token response' };
+        }
 
         logOAuth('Token exchange response received', {
           status: response.status,
           hasAccessToken: !!data.access_token,
           hasRefreshToken: !!data.refresh_token,
           expiresIn: data.expires_in,
+          error: data.error,
+          errorDescription: data.error_description,
           timestamp: new Date().toISOString(),
         });
 
         if (!response.ok || !data.access_token) {
-          throw new Error(data.error || 'Failed to exchange code for token');
+          throw new Error(data.error_description || data.error || 'Failed to exchange code for token');
         }
 
         const expiry = data.expires_in ? Date.now() + data.expires_in * 1000 : null;
