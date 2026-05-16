@@ -92,7 +92,6 @@ export const AuthProvider = ({ children }) => {
   const [balances, setBalances] = useState({});
   const [marketTicks, setMarketTicks] = useState({});
   const [marketSubscriptions, setMarketSubscriptions] = useState([]);
-  const [initializationStep, setInitializationStep] = useState(accessToken ? 'Connecting to markets...' : '');
   const [accessToken, setAccessToken] = useState(() => {
     try {
       return localStorage.getItem('deriv_access_token');
@@ -115,6 +114,13 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.warn('[AuthContext] Failed to read token expiry from localStorage', err);
       return null;
+    }
+  });
+  const [initializationStep, setInitializationStep] = useState(() => {
+    try {
+      return localStorage.getItem('deriv_access_token') ? 'Connecting to markets...' : '';
+    } catch {
+      return '';
     }
   });
   const [loginStatus, setLoginStatus] = useState(accessToken ? 'pending' : 'unauthenticated');

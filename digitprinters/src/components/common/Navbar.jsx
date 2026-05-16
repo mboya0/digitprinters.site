@@ -20,7 +20,7 @@ const navigation = [
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
-  const { isAuthenticated, logout, login } = useAuth();
+  const { isAuthenticated = false, logout, login } = useAuth() || {};
 
   return (
     <nav className="sticky top-0 z-50 border-b border-slate-800 bg-slate-950/95 backdrop-blur-xl shadow-[0_25px_80px_rgba(15,23,42,0.35)]">
@@ -56,7 +56,7 @@ export default function Navbar() {
         <div className="hidden items-center gap-3 md:flex">
           {isAuthenticated ? (
             <button
-              onClick={logout}
+              onClick={() => typeof logout === 'function' && logout()}
               className="inline-flex items-center rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
             >
               <LogOut size={16} />
@@ -64,7 +64,7 @@ export default function Navbar() {
             </button>
           ) : (
             <button
-              onClick={login}
+              onClick={() => typeof login === 'function' && login()}
               className="inline-flex items-center rounded-full bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
             >
               <LogIn size={16} />
@@ -111,7 +111,7 @@ export default function Navbar() {
             {isAuthenticated ? (
               <button
                 onClick={() => {
-                  logout();
+                  if (typeof logout === 'function') logout();
                   setIsOpen(false);
                 }}
                 className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-500"
@@ -121,7 +121,7 @@ export default function Navbar() {
             ) : (
               <button
                 onClick={() => {
-                  login();
+                  if (typeof login === 'function') login();
                   setIsOpen(false);
                 }}
                 className="rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
