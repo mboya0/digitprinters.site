@@ -24,7 +24,7 @@ const logCallbackError = (msg, error) => {
 export default function Callback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { handleCallback } = useAuth();
+  const { handleCallback, initializationStep } = useAuth();
   const { addToast } = useToast();
 
   useEffect(() => {
@@ -82,5 +82,5 @@ export default function Callback() {
       });
   }, [searchParams, handleCallback, navigate, addToast]);
 
-  return <LoadingSpinner fullScreen />;
+  return <LoadingSpinner fullScreen message={initializationStep || 'Authenticating...'} />;
 }

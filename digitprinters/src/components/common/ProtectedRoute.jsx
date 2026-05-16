@@ -10,7 +10,7 @@ const logProtectedRoute = (msg, data) => {
 };
 
 export default function ProtectedRoute() {
-  const { isAuthenticated, loading, loginStatus, error } = useAuth();
+  const { isAuthenticated, loading, loginStatus, error, accessToken, initializationStep } = useAuth();
   const location = useLocation();
 
   logProtectedRoute('ProtectedRoute check', {
@@ -19,12 +19,17 @@ export default function ProtectedRoute() {
     loading,
     loginStatus,
     hasError: !!error,
+    hasAccessToken: !!accessToken,
+    initializationStep,
   });
 
   // Show loading spinner while checking authentication
-  if (loading) {
-    logProtectedRoute('Still loading, showing spinner', { path: location.pathname });
-    return <LoadingSpinner fullScreen />;
+  if (loading || loginStatus === 'initializing' || (accessToken && !isAuthenticated && !error)) {
+    logProtectedRoute('Auth or market initialization in progress, showing spinner', {
+      path: location.pathname,
+      initializationStep,
+    });
+    return <LoadingSpinner fullScreen message={initializationStep || 'Connecting to markets...'} />;
   }
 
   // Redirect to home if not authenticated

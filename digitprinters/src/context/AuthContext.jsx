@@ -20,6 +20,23 @@ import { DERIV_OAUTH_CONFIG, OAUTH_LOGGING } from '../utils/constants';
 
 const AuthContext = createContext(null);
 
+const SYNTHETIC_SUBSCRIPTION_SYMBOLS = [
+  'R_10',
+  'R_25',
+  'R_50',
+  'R_75',
+  'R_100',
+  'BOOM500',
+  'BOOM1000',
+  'CRASH500',
+  'CRASH1000',
+  'JD10',
+  'JD25',
+  'JD50',
+  'JD75',
+  'JD100',
+];
+
 // ==================== OAuth State Management ====================
 
 const getStoredState = () => localStorage.getItem('deriv_oauth_state');
@@ -72,6 +89,10 @@ export const AuthProvider = ({ children }) => {
   const [status, setStatus] = useState('disconnected');
   const [error, setError] = useState(null);
   const [websiteStatus, setWebsiteStatus] = useState(null);
+  const [balances, setBalances] = useState({});
+  const [marketTicks, setMarketTicks] = useState({});
+  const [marketSubscriptions, setMarketSubscriptions] = useState([]);
+  const [initializationStep, setInitializationStep] = useState(accessToken ? 'Connecting to markets...' : '');
   const [accessToken, setAccessToken] = useState(() => {
     try {
       return localStorage.getItem('deriv_access_token');
@@ -105,6 +126,170 @@ export const AuthProvider = ({ children }) => {
     return instance;
   }, [deriv]);
 
+  const normalizeAccount = useCallback((account, balanceResponse) => {
+    const balancePayload = balanceResponse?.balance || {};
+    const loginid = account.loginid || account.account_number || balancePayload.loginid;
+    const currency = balancePayload.currency || account.currency || 'USD';
+    const balance = Number(balancePayload.balance ?? account.balance ?? 0);
+
+    return {
+      ...account,
+      loginid,
+      account_number: account.account_number || loginid,
+      balance,
+      currency,
+      account_type: account.account_type || (account.is_virtual ? 'virtual' : 'real'),
+    };
+  }, []);
+
+  const initializeAuthenticatedSession = useCallback(async (token, reason = 'callback') => {
+    if (!token) {
+      throw new Error('No access token available for session initialization');
+    }
+
+    const derivInstance = ensureDeriv();
+    setLoading(true);
+    setInitializationStep(reason === 'restore' ? 'Restoring authentication...' : 'Authenticating...');
+    setLoginStatus('initializing');
+    setIsAuthenticated(false);
+    setError(null);
+
+    logOAuth('Starting authenticated trading session initialization', {
+      reason,
+      websocketUrl: 'wss://ws.derivws.com/websockets/v3?app_id=134275',
+      timestamp: new Date().toISOString(),
+    });
+
+    derivInstance.setToken(token);
+
+    setInitializationStep('Connecting to markets...');
+    await derivInstance.connect();
+
+    logOAuth('Websocket connected for trading session', {
+      connected: derivInstance.isConnected(),
+      reason,
+      timestamp: new Date().toISOString(),
+    });
+
+    setInitializationStep('Authenticating...');
+    const authorizationResponse = await derivInstance.authorize(token);
+    const authorizePayload = authorizationResponse.authorize || {};
+
+    logOAuth('Authorization response received', {
+      loginid: authorizePayload.loginid,
+      currency: authorizePayload.currency,
+      isVirtual: authorizePayload.is_virtual,
+      scopes: authorizePayload.scopes,
+      timestamp: new Date().toISOString(),
+    });
+
+    setInitializationStep('Loading balances...');
+    const accountListResponse = await derivInstance.getAccountList();
+    const accountList = Array.isArray(accountListResponse.account_list) ? accountListResponse.account_list : [];
+
+    logOAuth('Account list loaded', {
+      accountCount: accountList.length,
+      loginIds: accountList.map((account) => account.loginid || account.account_number).filter(Boolean),
+      currencies: [...new Set(accountList.map((account) => account.currency).filter(Boolean))],
+    });
+
+    const balanceEntries = await Promise.all(
+      accountList.map(async (account) => {
+        const loginid = account.loginid || account.account_number;
+        try {
+          const balanceResponse = await derivInstance.getBalance(loginid);
+          logOAuth('Balance fetch complete', {
+            loginid,
+            balance: balanceResponse.balance?.balance,
+            currency: balanceResponse.balance?.currency,
+          });
+          return [loginid, normalizeAccount(account, balanceResponse)];
+        } catch (err) {
+          logOAuthError('Balance fetch failed', {
+            loginid,
+            error: err?.message || String(err),
+          });
+          return [loginid, normalizeAccount(account, null)];
+        }
+      })
+    );
+
+    const balanceMap = Object.fromEntries(balanceEntries);
+    const hydratedAccounts = Object.values(balanceMap);
+    const activeAccount =
+      hydratedAccounts.find((account) => account.loginid === authorizePayload.loginid) ||
+      hydratedAccounts.find((account) => account.account_number === authorizePayload.account_number) ||
+      hydratedAccounts[0] ||
+      normalizeAccount(authorizePayload, { balance: authorizePayload });
+
+    setUser({
+      accountId: activeAccount.loginid || activeAccount.account_number || authorizePayload.loginid || 'Unknown',
+      balance: Number(activeAccount.balance || 0),
+      currency: activeAccount.currency || authorizePayload.currency || 'USD',
+      email: authorizePayload.email || '',
+      accountType: activeAccount.is_virtual || activeAccount.account_type === 'virtual' ? 'Demo' : 'Real',
+      loginid: activeAccount.loginid || authorizePayload.loginid,
+    });
+    setAccounts(hydratedAccounts);
+    setBalances(balanceMap);
+    setSelectedAccount(activeAccount);
+
+    logOAuth('Active account selected', {
+      loginid: activeAccount.loginid,
+      accountNumber: activeAccount.account_number,
+      currency: activeAccount.currency,
+      balance: activeAccount.balance,
+      accountType: activeAccount.account_type,
+    });
+
+    const statusResponse = await derivInstance.getWebsiteStatus();
+    setWebsiteStatus(statusResponse.website_status || null);
+
+    setInitializationStep('Connecting to markets...');
+    const subscribedSymbols = [];
+    await Promise.all(
+      SYNTHETIC_SUBSCRIPTION_SYMBOLS.map(async (symbol) => {
+        try {
+          await derivInstance.subscribeTicks(symbol, (tick) => {
+            setMarketTicks((current) => ({ ...current, [symbol]: tick }));
+          });
+          subscribedSymbols.push(symbol);
+        } catch (err) {
+          logOAuthError('Market subscription failed', {
+            symbol,
+            error: err?.message || String(err),
+          });
+        }
+      })
+    );
+    setMarketSubscriptions(subscribedSymbols);
+
+    logOAuth('Market subscriptions initialized', {
+      symbols: subscribedSymbols,
+      requestedSymbols: SYNTHETIC_SUBSCRIPTION_SYMBOLS,
+    });
+
+    setIsAuthenticated(true);
+    setLoginStatus('authenticated');
+    setInitializationStep('');
+    setLoading(false);
+
+    logOAuth('Authenticated trading session ready', {
+      reason,
+      accountCount: hydratedAccounts.length,
+      balanceCount: Object.keys(balanceMap).length,
+      marketSubscriptionCount: subscribedSymbols.length,
+    });
+
+    return {
+      authorization: authorizationResponse,
+      accounts: hydratedAccounts,
+      balances: balanceMap,
+      activeAccount,
+      subscriptions: subscribedSymbols,
+    };
+  }, [ensureDeriv, normalizeAccount]);
+
   const logout = useCallback(() => {
     try {
       logOAuth('User logout initiated', { timestamp: new Date().toISOString() });
@@ -119,6 +304,10 @@ export const AuthProvider = ({ children }) => {
       setLoginStatus('unauthenticated');
       setStatus('disconnected');
       setWebsiteStatus(null);
+      setBalances({});
+      setMarketTicks({});
+      setMarketSubscriptions([]);
+      setInitializationStep('');
       setError(null);
 
       // Safe localStorage operations
@@ -157,6 +346,10 @@ export const AuthProvider = ({ children }) => {
       setLoginStatus('unauthenticated');
       setStatus('disconnected');
       setWebsiteStatus(null);
+      setBalances({});
+      setMarketTicks({});
+      setMarketSubscriptions([]);
+      setInitializationStep('');
       setError(null);
     }
   }, [deriv]);
@@ -214,10 +407,7 @@ export const AuthProvider = ({ children }) => {
         setLoginStatus('authenticated');
         setError(null);
 
-        if (deriv) {
-          deriv.setToken(data.access_token);
-          await deriv.connect();
-        }
+        await initializeAuthenticatedSession(data.access_token, 'refresh');
 
         return data;
       } catch (err) {
@@ -233,7 +423,7 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       throw outerErr;
     }
-  }, [deriv, logout, refreshToken]);
+  }, [initializeAuthenticatedSession, logout, refreshToken]);
 
   useEffect(() => {
     try {
@@ -265,74 +455,8 @@ export const AuthProvider = ({ children }) => {
         }
       };
 
-      const handleAuthorized = async (data) => {
-        try {
-          setLoginStatus('authenticated');
-          setIsAuthenticated(true);
-          setError(null);
-
-          const account = data.authorize?.account || {};
-          setUser({
-            accountId: account.account_number || account.loginid || 'Unknown',
-            balance: Number(account.balance || 0),
-            currency: account.currency || 'USD',
-            email: account.email || '',
-            accountType:
-              account.is_virtual || account.account_type === 'virtual' ? 'Demo' : 'Real',
-          });
-
-          try {
-            const accountListResponse = await derivInstance.getAccountList();
-            const fetchedAccounts = Array.isArray(accountListResponse.account_list)
-              ? accountListResponse.account_list
-              : [];
-            setAccounts(fetchedAccounts);
-            const authorizedAccount = fetchedAccounts.find(
-              (acc) => acc.account_number === account.account_number || acc.loginid === account.loginid
-            );
-            setSelectedAccount(authorizedAccount || fetchedAccounts[0] || null);
-          } catch (err) {
-            console.error('Error fetching accounts:', err);
-          }
-        } catch (err) {
-          console.error('[AuthContext] Error in handleAuthorized:', err);
-          handleError(err);
-        }
-      };
-
-      const fetchAccounts = async () => {
-        if (!derivInstance || !derivInstance.isConnected()) return;
-        try {
-          const response = await derivInstance.getAccountList();
-          const refreshedAccounts = Array.isArray(response.account_list)
-            ? response.account_list
-            : [];
-          setAccounts(refreshedAccounts);
-        } catch (err) {
-          console.error('Error refreshing accounts:', err);
-        }
-      };
-
-      const connect = async () => {
-        try {
-          logOAuth('Connecting to Deriv websocket', { timestamp: new Date().toISOString() });
-          await derivInstance.connect();
-          const statusResponse = await derivInstance.getWebsiteStatus();
-          setWebsiteStatus(statusResponse.website_status || null);
-          logOAuth('Websocket connected and website status retrieved', {
-            timestamp: new Date().toISOString(),
-          });
-          await fetchAccounts();
-        } catch (err) {
-          handleError(err);
-        } finally {
-          setLoading(false);
-        }
-      };
-
       const unsubStatus = derivInstance.on('status', updateStatus);
       const unsubError = derivInstance.on('error', handleError);
-      const unsubAuthorized = derivInstance.on('authorized', handleAuthorized);
 
       let refreshTimer = null;
       const scheduleRefresh = () => {
@@ -348,14 +472,27 @@ export const AuthProvider = ({ children }) => {
       };
 
       if (accessToken) {
-        derivInstance.setToken(accessToken);
         if (tokenExpiry && Date.now() > tokenExpiry && refreshToken) {
+          logOAuth('Stored token expired, refreshing before auth restoration', {
+            timestamp: new Date().toISOString(),
+          });
           refreshAccessToken().catch(() => {});
         } else {
-          connect();
+          logOAuth('Auth restoration started from persisted token', {
+            timestamp: new Date().toISOString(),
+          });
+          initializeAuthenticatedSession(accessToken, 'restore').catch((err) => {
+            logOAuthError('Auth restoration failed', {
+              error: err?.message || String(err),
+            });
+            setLoading(false);
+            setLoginStatus('unauthenticated');
+            setIsAuthenticated(false);
+          });
         }
         scheduleRefresh();
       } else {
+        setInitializationStep('');
         setLoading(false);
       }
 
@@ -363,11 +500,9 @@ export const AuthProvider = ({ children }) => {
         try {
           unsubStatus();
           unsubError();
-          unsubAuthorized();
           if (refreshTimer) {
             clearTimeout(refreshTimer);
           }
-          derivInstance.disconnect();
         } catch (err) {
           console.warn('[AuthContext] Error during cleanup:', err);
         }
@@ -378,7 +513,7 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       setStatus('error');
     }
-  }, [accessToken, addToast, refreshAccessToken, refreshToken, tokenExpiry]);
+  }, [accessToken, addToast, initializeAuthenticatedSession, refreshAccessToken, refreshToken, tokenExpiry]);
 
   const login = useCallback(() => {
     const state = generateRandomState();
@@ -493,22 +628,10 @@ export const AuthProvider = ({ children }) => {
         setAccessToken(data.access_token);
         setRefreshToken(data.refresh_token || '');
         setTokenExpiry(expiry);
-        setLoginStatus('authenticated');
-        clearStoredAuthState();
-
-        logOAuth('Initializing websocket connection with OAuth token', {
-          timestamp: new Date().toISOString(),
-        });
-
-        const derivInstance = ensureDeriv();
-        derivInstance.setToken(data.access_token);
-        await derivInstance.connect();
-
-        logOAuth('Websocket connected successfully', {
-          timestamp: new Date().toISOString(),
-        });
-
         const redirectPath = getPostLoginRedirect();
+        clearStoredAuthState();
+        await initializeAuthenticatedSession(data.access_token, 'callback');
+
         logOAuth('OAuth callback completed', {
           redirectPath,
           timestamp: new Date().toISOString(),
@@ -528,7 +651,7 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
       }
     },
-    [deriv]
+    [initializeAuthenticatedSession]
   );
 
   const connectDeriv = useCallback(async () => {
@@ -552,18 +675,14 @@ export const AuthProvider = ({ children }) => {
     }
     setLoading(true);
     try {
-      const response = await deriv.authorize(accessToken);
-      if (response.authorize) {
-        setIsAuthenticated(true);
-      }
-      return response;
+      return initializeAuthenticatedSession(accessToken, 'manual');
     } catch (err) {
       setError(err.message || 'Authorization failed');
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [deriv, accessToken]);
+  }, [deriv, accessToken, initializeAuthenticatedSession]);
 
   try {
     return (
@@ -579,6 +698,10 @@ export const AuthProvider = ({ children }) => {
           status,
           error,
           websiteStatus,
+          balances,
+          marketTicks,
+          marketSubscriptions,
+          initializationStep,
           accessToken,
           login,
           handleCallback,
@@ -607,6 +730,10 @@ export const AuthProvider = ({ children }) => {
           status: 'error',
           error: 'Authentication system failed to initialize',
           websiteStatus: null,
+          balances: {},
+          marketTicks: {},
+          marketSubscriptions: [],
+          initializationStep: '',
           accessToken: null,
           login: () => {},
           handleCallback: () => {},
